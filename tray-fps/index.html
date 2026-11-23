@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>TRAY Black Rain</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
+<style>
+/* 레이아웃: 전체 화면 3D 캔버스 위에 전술 HUD 를 겹치는 단일 화면 게임. 의도적으로 다크 단일 테마. */
+:root {
+  --ink: #ebe7df;
+  --ink-dim: rgba(235, 231, 223, 0.62);
+  --ink-faint: rgba(235, 231, 223, 0.16);
+  --amber: #ffb24a;
+  --danger: #ff4a3d;
+  --cyan: #5fd6ff;
+  --panel: rgba(10, 11, 13, 0.58);
+  --panel-solid: #0d0e10;
+  --bg: #050506;
+  --f-display: "Chakra Petch", "IBM Plex Sans KR", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --sl: env(safe-area-inset-left, 0px); --sr: env(safe-area-inset-right, 0px);
+  --st: env(safe-area-inset-top, 0px); --sb: env(safe-area-inset-bottom, 0px);
+  color-scheme: dark;
+}
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; background: var(--bg); color: var(--ink); overflow: hidden; }
+body { font-family: var(--f-body); -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; touch-action: none; overscroll-behavior: none; }
+#stage, #stage canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+#touch-layer { position: fixed; inset: 0; z-index: 2; touch-action: none; }
+button { font: inherit; color: inherit; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+/* ── HUD ── */
+#hud { position: fixed; inset: 0; z-index: 3; pointer-events: none; font-family: var(--f-display); }
+.tl { position: absolute; top: calc(14px + var(--st)); left: max(16px, calc(var(--sl) + 12px)); display: grid; gap: 8px; }
+.hp-row { display: flex; align-items: center; gap: 10px; }
+.hp-label { font-size: 11px; letter-spacing: 0.18em; color: var(--ink-dim); }
+.hp-bar { width: 170px; height: 7px; background: var(--ink-faint); position: relative; overflow: hidden; clip-path: polygon(0 0, 100% 0, calc(100% - 6px) 100%, 0 100%); }
+.hp-fill { position: absolute; inset: 0; background: var(--ink); transform-origin: left; transition: transform 0.12s linear, background 0.3s; }
+.hp-fill.low { background: var(--danger); }
+.hp-num { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 3ch; }
+.wave-line { font-size: 12px; letter-spacing: 0.14em; color: var(--ink-dim); }
+.wave-line b { color: var(--amber); font-weight: 700; }
+.tc { position: absolute; top: calc(10px + var(--st)); left: 50%; transform: translateX(-50%); display: grid; justify-items: center; gap: 4px; }
+.compass { width: min(300px, 40vw); height: 22px; overflow: hidden; position: relative; mask-image: linear-gradient(90deg, transparent, #000 20%, #000 80%, transparent); -webkit-mask-image: linear-gradient(90deg, transparent, #000 20%, #000 80%, transparent); }
+.compass-strip { position: absolute; top: 0; left: 0; height: 100%; white-space: nowrap; font-size: 11px; letter-spacing: 0.08em; color: var(--ink-dim); will-change: transform; }
+.compass-strip span { display: inline-block; width: 30px; text-align: center; }
+.compass-strip span.c { color: var(--ink); font-weight: 700; }
+.compass::after { content: ""; position: absolute; left: 50%; bottom: 0; width: 2px; height: 6px; background: var(--amber); transform: translateX(-50%); }
+.score { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: 0.06em; }
+.tr { position: absolute; top: calc(12px + var(--st)); right: max(16px, calc(var(--sr) + 12px)); display: flex; align-items: flex-start; gap: 12px; }
+.ammo { pointer-events: auto; text-align: right; background: none; border: 0; padding: 0; cursor: pointer; }
+.ammo-main { font-size: 34px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.ammo-main small { font-size: 16px; color: var(--ink-dim); font-weight: 500; }
+.ammo-main.empty { color: var(--danger); }
+.wpn { font-family: var(--f-body); font-size: 11px; color: var(--ink-dim); letter-spacing: 0.04em; margin-top: 3px; }
+.icon-btn { pointer-events: auto; width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--ink-faint); background: var(--panel); display: grid; place-items: center; cursor: pointer; }
+.fps { position: absolute; bottom: calc(8px + var(--sb)); left: 50%; transform: translateX(-50%); font-size: 11px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+
+/* 조준선 */
+.xh { position: absolute; left: 50%; top: 50%; width: 0; height: 0; transition: opacity 0.12s; }
+.xh i { position: absolute; background: var(--ink); box-shadow: 0 0 2px rgba(0,0,0,0.9); }
+.xh .l, .xh .r { width: 9px; height: 2px; top: -1px; }
+.xh .u, .xh .d { width: 2px; height: 9px; left: -1px; }
+.xh .dot { width: 2px; height: 2px; left: -1px; top: -1px; }
+.hit { position: absolute; left: 50%; top: 50%; width: 30px; height: 30px; margin: -15px 0 0 -15px; opacity: 0; }
+.hit::before, .hit::after { content: ""; position: absolute; left: 50%; top: 50%; width: 30px; height: 2px; margin: -1px 0 0 -15px; background: linear-gradient(90deg, var(--ink) 0 33%, transparent 33% 67%, var(--ink) 67%); }
+.hit::before { transform: rotate(45deg); } .hit::after { transform: rotate(-45deg); }
+.hit.kill::before, .hit.kill::after { background: linear-gradient(90deg, var(--danger) 0 33%, transparent 33% 67%, var(--danger) 67%); }
+.hit.show { animation: hitpop 0.22s ease-out; }
+@keyframes hitpop { 0% { opacity: 1; transform: scale(1.25); } 100% { opacity: 0; transform: scale(1); } }
+.reload-ring { position: absolute; left: 50%; top: calc(50% + 34px); transform: translateX(-50%); font-size: 11px; letter-spacing: 0.2em; color: var(--amber); opacity: 0; transition: opacity 0.15s; }
+.reload-ring.on { opacity: 1; }
+.reload-bar { width: 80px; height: 2px; background: var(--ink-faint); margin-top: 4px; }
+.reload-bar i { display: block; height: 100%; background: var(--amber); transform-origin: left; }
+#dmg { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
+.dmg-arc { position: absolute; left: -70px; top: -70px; width: 140px; height: 140px; border-radius: 50%; border: 3px solid transparent; border-top-color: var(--danger); filter: drop-shadow(0 0 6px rgba(255, 60, 40, 0.9)); animation: dmgfade 1.3s ease-out forwards; }
+@keyframes dmgfade { 0% { opacity: 1; } 100% { opacity: 0; } }
+.feed { position: absolute; right: max(16px, calc(var(--sr) + 12px)); top: 34%; display: grid; gap: 4px; justify-items: end; font-family: var(--f-body); font-size: 12px; }
+.feed div { background: var(--panel); padding: 4px 10px; border-right: 2px solid var(--amber); animation: feedin 3.2s ease-out forwards; }
+.feed b { font-family: var(--f-display); color: var(--amber); margin-left: 8px; }
+@keyframes feedin { 0% { opacity: 0; transform: translateX(14px); } 8%, 80% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+.banner { position: absolute; left: 50%; top: 24%; transform: translateX(-50%); text-align: center; opacity: 0; pointer-events: none; }
+.banner.show { animation: banner 3s ease-out forwards; }
+.banner h2 { margin: 0; font-family: var(--f-display); font-size: clamp(26px, 5vw, 44px); letter-spacing: 0.24em; font-weight: 700; text-shadow: 0 2px 20px rgba(0,0,0,0.8); }
+.banner p { margin: 4px 0 0; font-size: 13px; color: var(--amber); letter-spacing: 0.12em; }
+@keyframes banner { 0% { opacity: 0; letter-spacing: 0.5em; } 12%, 78% { opacity: 1; letter-spacing: 0.24em; } 100% { opacity: 0; } }
+
+/* ── 터치 컨트롤 ── */
+#controls { position: fixed; inset: 0; z-index: 4; pointer-events: none; }
+.tbtn { position: absolute; pointer-events: auto; border-radius: 50%; border: 1.5px solid rgba(235,231,223,0.32); background: rgba(10, 11, 13, 0.38); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); display: grid; place-items: center; font-family: var(--f-display); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; color: var(--ink); touch-action: none; transition: transform 0.06s, background 0.1s; }
+.tbtn svg { width: 46%; height: 46%; }
+.tbtn.held { transform: scale(0.92); background: rgba(255, 178, 74, 0.32); border-color: var(--amber); }
+.tbtn.on { border-color: var(--amber); color: var(--amber); }
+.b-fire { width: 96px; height: 96px; right: calc(56px + var(--sr)); bottom: calc(60px + var(--sb)); border-width: 2px; }
+.b-fire2 { width: 58px; height: 58px; left: calc(36px + var(--sl)); bottom: calc(205px + var(--sb)); }
+.b-ads { width: 62px; height: 62px; right: calc(170px + var(--sr)); bottom: calc(40px + var(--sb)); }
+.b-crouch { width: 56px; height: 56px; right: calc(180px + var(--sr)); bottom: calc(128px + var(--sb)); }
+.b-jump { width: 58px; height: 58px; right: calc(28px + var(--sr)); bottom: calc(178px + var(--sb)); }
+.b-reload { width: 52px; height: 52px; right: calc(110px + var(--sr)); bottom: calc(190px + var(--sb)); }
+#joy-base { position: fixed; left: 0; top: 0; width: 120px; height: 120px; border-radius: 50%; border: 1.5px solid rgba(235,231,223,0.28); background: radial-gradient(circle, rgba(10,11,13,0.1), rgba(10,11,13,0.42)); opacity: 0; transition: opacity 0.12s, border-color 0.15s; z-index: 4; pointer-events: none; }
+#joy-base.on { opacity: 1; }
+#joy-base.sprint { border-color: var(--amber); }
+#joy-knob { position: absolute; left: 36px; top: 36px; width: 48px; height: 48px; border-radius: 50%; background: rgba(235,231,223,0.55); box-shadow: 0 0 12px rgba(0,0,0,0.5); }
+.joy-hint { position: fixed; left: calc(60px + var(--sl)); bottom: calc(60px + var(--sb)); width: 96px; height: 96px; border-radius: 50%; border: 1.5px dashed rgba(235,231,223,0.2); z-index: 3; pointer-events: none; display: grid; place-items: center; font-size: 10px; color: var(--ink-dim); letter-spacing: 0.12em; font-family: var(--f-display); }
+
+/* ── 메뉴/오버레이 ── */
+.screen { position: fixed; inset: 0; z-index: 10; display: grid; align-items: center; padding-left: max(16px, calc(var(--sl) + 24px)); padding-right: max(16px, calc(var(--sr) + 24px)); padding-block: calc(16px + var(--st)) calc(16px + var(--sb)); overflow-y: auto; touch-action: pan-y; }
+.screen.dim { background: rgba(5, 5, 6, 0.72); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
+#menu { background: linear-gradient(90deg, rgba(5,5,6,0.86) 0%, rgba(5,5,6,0.5) 45%, rgba(5,5,6,0) 75%); }
+.menu-col { display: grid; gap: 22px; max-width: 460px; }
+.eyebrow { font-family: var(--f-display); font-size: 12px; letter-spacing: 0.32em; color: var(--amber); }
+.title { font-family: var(--f-display); font-weight: 700; font-size: clamp(40px, 8vw, 78px); line-height: 0.92; letter-spacing: 0.02em; margin: 0; text-wrap: balance; }
+.title span { display: block; color: transparent; -webkit-text-stroke: 1.5px var(--ink); }
+.lede { margin: 0; color: var(--ink-dim); font-size: 14px; line-height: 1.6; max-width: 42ch; }
+.btn-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.btn { appearance: none; border: 1px solid var(--ink-faint); background: var(--panel); color: var(--ink); padding: 13px 22px; font-family: var(--f-display); font-weight: 600; font-size: 14px; letter-spacing: 0.16em; cursor: pointer; clip-path: polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%); transition: background 0.15s, border-color 0.15s; }
+.btn:hover { border-color: var(--ink-dim); }
+.btn.primary { background: var(--amber); color: #120d05; border-color: var(--amber); }
+.btn.primary:hover { background: #ffc36f; }
+.meta-row { display: flex; gap: 22px; flex-wrap: wrap; font-size: 12px; color: var(--ink-dim); }
+.meta-row b { display: block; font-family: var(--f-display); font-size: 18px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.keys { font-size: 12px; color: var(--ink-dim); line-height: 1.8; }
+.keys kbd { font-family: var(--f-display); font-size: 11px; border: 1px solid var(--ink-faint); padding: 1px 6px; margin-right: 4px; color: var(--ink); }
+.panel { justify-self: center; width: min(560px, 100%); background: rgba(13, 14, 16, 0.92); border: 1px solid var(--ink-faint); padding: 24px; display: grid; gap: 18px; }
+.panel h3 { margin: 0; font-family: var(--f-display); font-size: 20px; letter-spacing: 0.2em; }
+.row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px; font-size: 13px; }
+.row .hint { display: block; font-size: 11px; color: var(--ink-dim); margin-top: 2px; }
+.seg { display: flex; border: 1px solid var(--ink-faint); }
+.seg button { appearance: none; background: none; border: 0; padding: 8px 11px; font-size: 12px; cursor: pointer; color: var(--ink-dim); font-family: var(--f-body); }
+.seg button.on { background: var(--amber); color: #120d05; font-weight: 600; }
+input[type=range] { width: 150px; accent-color: var(--amber); }
+.tog { appearance: none; width: 42px; height: 22px; border-radius: 11px; background: var(--ink-faint); position: relative; cursor: pointer; border: 0; }
+.tog::after { content: ""; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--ink); transition: transform 0.15s; }
+.tog.on { background: var(--amber); } .tog.on::after { transform: translateX(20px); background: #120d05; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 12px; }
+.stat { border-top: 1px solid var(--ink-faint); padding-top: 8px; font-size: 11px; color: var(--ink-dim); letter-spacing: 0.08em; }
+.stat b { display: block; font-family: var(--f-display); font-size: 26px; color: var(--ink); font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.stat.hl b { color: var(--amber); }
+#loading { background: var(--bg); justify-items: center; text-align: center; }
+.load-box { display: grid; gap: 14px; width: min(340px, 80vw); }
+.load-bar { height: 2px; background: var(--ink-faint); }
+.load-bar i { display: block; height: 100%; width: 0; background: var(--amber); transition: width 0.2s; }
+.load-label { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.08em; min-height: 1.4em; }
+.err { color: var(--danger); font-size: 12px; white-space: pre-wrap; text-align: left; }
+#rotate { z-index: 20; background: rgba(5,5,6,0.94); justify-items: center; text-align: center; }
+#rotate svg { width: 64px; height: 64px; animation: rot 2s ease-in-out infinite; }
+@keyframes rot { 0%, 30% { transform: rotate(0); } 60%, 100% { transform: rotate(-90deg); } }
+@media (max-width: 640px) { .compass { display: none; } .hp-bar { width: 96px; } .ammo-main { font-size: 26px; } .wpn { display: none; } .tc { top: calc(44px + var(--st)); } }
+@media (max-height: 460px) { .menu-col { gap: 14px; } .title { font-size: clamp(34px, 7vw, 56px); } .panel { padding: 16px; gap: 12px; } }
+@media (prefers-reduced-motion: reduce) { .banner.show, .feed div, #rotate svg { animation-duration: 0.01s; } }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="stage"></div>
+<div id="touch-layer"></div>
+
+<div id="hud" hidden>
+  <div class="tl">
+    <div class="hp-row"><span class="hp-label">HP</span><div class="hp-bar"><div class="hp-fill" id="hp-fill"></div></div><span class="hp-num" id="hp-num">100</span></div>
+    <div class="wave-line">WAVE <b id="wave-n">01</b> · 남은 적 <b id="wave-left">0</b></div>
+  </div>
+  <div class="tc">
+    <div class="compass"><div class="compass-strip" id="compass"></div></div>
+    <div class="score" id="score">0</div>
+  </div>
+  <div class="tr">
+    <button class="ammo" data-act="swap" aria-label="무기 교체">
+      <div class="ammo-main" id="ammo-main">30<small> / 210</small></div>
+      <div class="wpn" id="wpn-name">TR-7 카빈 · 5.56×45mm</div>
+    </button>
+    <button class="icon-btn" data-act="pause" aria-label="일시정지"><svg viewBox="0 0 24 24" width="16" height="16"><rect x="6" y="5" width="4" height="14" fill="currentColor"/><rect x="14" y="5" width="4" height="14" fill="currentColor"/></svg></button>
+  </div>
+  <div class="xh" id="xh"><i class="l"></i><i class="r"></i><i class="u"></i><i class="d"></i><i class="dot"></i></div>
+  <div class="hit" id="hit"></div>
+  <div class="reload-ring" id="reload">재장전<div class="reload-bar"><i id="reload-bar"></i></div></div>
+  <div id="dmg"></div>
+  <div class="feed" id="feed"></div>
+  <div class="banner" id="banner"><h2 id="banner-h"></h2><p id="banner-p"></p></div>
+  <div class="fps" id="fps" hidden></div>
+</div>
+
+<div id="controls" hidden>
+  <div class="joy-hint">MOVE</div>
+  <div id="joy-base"><div id="joy-knob"></div></div>
+  <button class="tbtn b-fire" data-act="fire" aria-label="사격"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 2v6M12 16v6M2 12h6M16 12h6" stroke="currentColor" stroke-width="1.6"/></svg></button>
+  <button class="tbtn b-fire2" data-act="fire" aria-label="사격(왼쪽)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/></svg></button>
+  <button class="tbtn b-ads" data-act="ads" id="b-ads" aria-label="정조준">조준</button>
+  <button class="tbtn b-crouch" data-act="crouch" id="b-crouch" aria-label="앉기"><svg viewBox="0 0 24 24"><path d="M5 19h14M8 19l3-6 4 1 2-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="6" r="2" fill="currentColor"/></svg></button>
+  <button class="tbtn b-jump" data-act="jump" aria-label="점프"><svg viewBox="0 0 24 24"><path d="M6 14l6-6 6 6M6 19l6-6 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+  <button class="tbtn b-reload" data-act="reload" aria-label="재장전"><svg viewBox="0 0 24 24"><path d="M19 12a7 7 0 1 1-2.05-4.95M19 4v4h-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+</div>
+
+<section id="loading" class="screen">
+  <div class="load-box">
+    <div class="eyebrow">TRAY · BLACK RAIN</div>
+    <div class="load-bar"><i id="load-bar"></i></div>
+    <div class="load-label" id="load-label">엔진 초기화</div>
+    <div class="err" id="load-err"></div>
+  </div>
+</section>
+
+<section id="menu" class="screen" hidden>
+  <div class="menu-col">
+    <div class="eyebrow">TRAY · 싱글 작전</div>
+    <h1 class="title">BLACK<span>RAIN</span></h1>
+    <p class="lede">폭우가 쏟아지는 해 질 녘 제7 항만 물류 기지. 통제를 벗어난 전투 안드로이드와 공격 드론이 몰려옵니다. 버틸 수 있는 데까지 버티세요.</p>
+    <div class="btn-row">
+      <button class="btn primary" id="btn-start">작전 개시</button>
+      <button class="btn" id="btn-settings">설정</button>
+    </div>
+    <div class="meta-row">
+      <div>최고 점수<b id="best-score">0</b></div>
+      <div>최고 웨이브<b id="best-wave">0</b></div>
+      <div>그래픽<b id="menu-quality">높음</b></div>
+    </div>
+    <div class="keys" id="keys-desktop"><kbd>WASD</kbd>이동 <kbd>마우스</kbd>조준·사격 <kbd>우클릭</kbd>정조준 <kbd>Shift</kbd>질주 <kbd>Space</kbd>점프 <kbd>C</kbd>앉기 <kbd>R</kbd>재장전 <kbd>Q</kbd>무기 교체 <kbd>Esc</kbd>일시정지</div>
+    <div class="keys" id="keys-touch" hidden>왼쪽 화면 드래그: 이동 (끝까지 밀면 질주) · 오른쪽 화면 드래그: 시점 · 사격 버튼을 누른 채 드래그하면 조준하며 사격 · 탄약 표시를 누르면 무기 교체</div>
+  </div>
+</section>
+
+<section id="pause" class="screen dim" hidden>
+  <div class="panel">
+    <h3>일시정지</h3>
+    <div class="btn-row">
+      <button class="btn primary" id="btn-resume">계속하기</button>
+      <button class="btn" id="btn-settings2">설정</button>
+      <button class="btn" id="btn-quit">메인 메뉴</button>
+    </div>
+  </div>
+</section>
+
+<section id="settings" class="screen dim" hidden>
+  <div class="panel">
+    <h3>설정</h3>
+    <div class="row"><div>그래픽 품질<span class="hint">울트라는 GTAO 주변광 차폐 추가 · 동적 해상도가 프레임을 지킵니다</span></div><div class="seg" id="seg-quality"></div></div>
+    <div class="row"><label for="s-sens">시점 감도 <span class="hint" id="s-sens-v">1.00</span></label><input type="range" id="s-sens" min="0.2" max="3" step="0.05"></div>
+    <div class="row"><label for="s-fov">시야각(FOV) <span class="hint" id="s-fov-v">78°</span></label><input type="range" id="s-fov" min="65" max="100" step="1"></div>
+    <div class="row"><label for="s-vol">음량 <span class="hint" id="s-vol-v">80%</span></label><input type="range" id="s-vol" min="0" max="1" step="0.05"></div>
+    <div class="row"><div>조준 보정 <span class="hint">터치 조작 시 적 위에서 시점이 살짝 느려집니다</span></div><button class="tog" id="t-aim" aria-label="조준 보정"></button></div>
+    <div class="row"><div>동적 해상도 <span class="hint">프레임이 떨어지면 렌더 해상도를 자동으로 낮춤</span></div><button class="tog" id="t-dyn" aria-label="동적 해상도"></button></div>
+    <div class="row"><div>진동</div><button class="tog" id="t-hap" aria-label="진동"></button></div>
+    <div class="row"><div>상하 반전</div><button class="tog" id="t-inv" aria-label="상하 반전"></button></div>
+    <div class="row"><div>FPS 표시</div><button class="tog" id="t-fps" aria-label="FPS 표시"></button></div>
+    <div class="btn-row"><button class="btn primary" id="btn-settings-close">완료</button></div>
+  </div>
+</section>
+
+<section id="gameover" class="screen dim" hidden>
+  <div class="panel">
+    <div class="eyebrow">작전 종료</div>
+    <h3 id="go-title">KIA · 전사</h3>
+    <div class="stats">
+      <div class="stat hl">점수<b id="go-score">0</b></div>
+      <div class="stat">도달 웨이브<b id="go-wave">0</b></div>
+      <div class="stat">처치<b id="go-kills">0</b></div>
+      <div class="stat">헤드샷<b id="go-heads">0</b></div>
+      <div class="stat">명중률<b id="go-acc">0%</b></div>
+      <div class="stat">최고 점수<b id="go-best">0</b></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn primary" id="btn-retry">다시 출격</button>
+      <button class="btn" id="btn-menu">메인 메뉴</button>
+    </div>
+  </div>
+</section>
+
+<section id="rotate" class="screen" hidden>
+  <div class="load-box">
+    <svg viewBox="0 0 64 64"><rect x="20" y="6" width="24" height="52" rx="4" fill="none" stroke="#ebe7df" stroke-width="2.5"/><circle cx="32" cy="51" r="2" fill="#ebe7df"/></svg>
+    <div>휴대폰을 가로로 돌려 주세요</div>
+    <div class="load-label">가로 화면에서 조작 버튼이 가장 편하게 배치됩니다</div>
+    <div><button class="btn" id="btn-rotate-skip">세로로 계속</button></div>
+  </div>
+</section>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
