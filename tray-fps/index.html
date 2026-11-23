@@ -182,6 +182,11 @@ input[type=range] { width: 150px; accent-color: var(--amber); }
 .go-team { display: grid; gap: 4px; font-size: 13px; }
 .go-team div { display: flex; justify-content: space-between; border-bottom: 1px solid var(--ink-faint); padding: 4px 0; }
 .go-team b { font-family: var(--f-display); color: var(--amber); font-weight: 600; }
+.go-team em, .lobby-list em { font-style: normal; font-size: 11px; color: var(--ink-dim); margin-left: 6px; }
+.lobby-list li.t0 { border-left-color: #5fb8ff; } .lobby-list li.t1 { border-left-color: #ff8a4a; }
+#mode-line b { color: var(--ink); } #mode-line b.mine { color: var(--amber); }
+.seg button:disabled { cursor: default; }
+.seg button:disabled:not(.on) { opacity: 0.5; }
 @media (max-width: 640px) { .compass { display: none; } .hp-bar { width: 96px; } .ammo-main { font-size: 26px; } .wpn { display: none; } .tc { top: calc(44px + var(--st)); } }
 @media (max-height: 460px) { .menu-col { gap: 14px; } .title { font-size: clamp(34px, 7vw, 56px); } .panel { padding: 16px; gap: 12px; } }
 @media (prefers-reduced-motion: reduce) { .banner.show, .feed div, #rotate svg { animation-duration: 0.01s; } }
@@ -200,7 +205,8 @@ input[type=range] { width: 150px; accent-color: var(--amber); }
 <div id="hud" hidden>
   <div class="tl">
     <div class="hp-row"><span class="hp-label">HP</span><div class="hp-bar"><div class="hp-fill" id="hp-fill"></div></div><span class="hp-num" id="hp-num">100</span></div>
-    <div class="wave-line">WAVE <b id="wave-n">01</b> · 남은 적 <b id="wave-left">0</b></div>
+    <div class="wave-line" id="wave-line">WAVE <b id="wave-n">01</b> · 남은 적 <b id="wave-left">0</b></div>
+    <div class="wave-line" id="mode-line" hidden></div>
     <div class="team" id="team"></div>
   </div>
   <div class="tc">
@@ -220,7 +226,7 @@ input[type=range] { width: 150px; accent-color: var(--amber); }
   <div class="reload-ring" id="reload">재장전<div class="reload-bar"><i id="reload-bar"></i></div></div>
   <div id="dmg"></div>
   <div id="gwarn" hidden>!</div>
-  <div id="down" hidden><b>전사</b><span>아군을 관전 중 · 웨이브가 끝나면 재투입됩니다</span></div>
+  <div id="down" hidden><b>전사</b><span id="down-sub">아군을 관전 중 · 웨이브가 끝나면 재투입됩니다</span></div>
   <div class="feed" id="feed"></div>
   <div class="banner" id="banner"><h2 id="banner-h"></h2><p id="banner-p"></p></div>
   <div class="fps" id="fps" hidden></div>
@@ -297,9 +303,9 @@ input[type=range] { width: 150px; accent-color: var(--amber); }
 
 <section id="gameover" class="screen dim" hidden>
   <div class="panel">
-    <div class="eyebrow">작전 종료</div>
+    <div class="eyebrow" id="go-eyebrow">작전 종료</div>
     <h3 id="go-title">KIA · 전사</h3>
-    <div class="stats">
+    <div class="stats" id="go-stats">
       <div class="stat hl">점수<b id="go-score">0</b></div>
       <div class="stat">도달 웨이브<b id="go-wave">0</b></div>
       <div class="stat">처치<b id="go-kills">0</b></div>
@@ -327,16 +333,19 @@ input[type=range] { width: 150px; accent-color: var(--amber); }
         <label class="field" for="lobby-code">방 코드<input id="lobby-code" maxlength="5" autocomplete="off" placeholder="ABCDE" inputmode="latin"></label>
         <button class="btn" id="btn-join">참가</button>
       </div>
-      <p class="note">방장의 기기가 서버 역할을 합니다. 방장이 화면을 끄거나 앱을 닫으면 게임이 멈춥니다. 일부 모바일 데이터망에서는 연결이 실패할 수 있으니, 같은 Wi-Fi 이거나 연결이 안 되면 다른 네트워크로 시도해 주세요.</p>
+      <p class="note">모드(협동 · 팀 대전 · 개인전)는 방을 만든 뒤 방장이 고릅니다. 방장의 기기가 서버 역할을 합니다. 방장이 화면을 끄거나 앱을 닫으면 게임이 멈춥니다. 일부 모바일 데이터망에서는 연결이 실패할 수 있으니, 같은 Wi-Fi 이거나 연결이 안 되면 다른 네트워크로 시도해 주세요.</p>
     </div>
     <div id="lobby-room" hidden style="display:grid;gap:14px">
       <div><div class="note">방 코드</div><div class="lobby-code" id="lobby-code-big">-----</div></div>
       <div class="btn-row"><button class="btn" id="btn-copy">초대 링크 복사</button></div>
+      <div class="row"><div>게임 모드<span class="hint" id="lobby-mode-note"></span></div>
+        <div class="seg" id="seg-mode"><button data-m="coop">협동</button><button data-m="tdm">팀 대전</button><button data-m="ffa">개인전</button></div></div>
       <div class="note">대원 <span id="lobby-count">1 / 4</span></div>
       <ul class="lobby-list" id="lobby-players"></ul>
       <div class="btn-row">
         <button class="btn primary" id="btn-go">출격</button>
         <span class="note" id="lobby-wait" hidden>방장이 출격하기를 기다리는 중…</span>
+        <button class="btn" id="btn-team" hidden>팀 바꾸기</button>
         <button class="btn" id="btn-lobby-leave">방 나가기</button>
       </div>
     </div>

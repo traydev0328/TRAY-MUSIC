@@ -173,6 +173,12 @@ export class Effects {
     this.smoke.spawn(p, _v.set(rnd(0.3), 0.3, rnd(0.3)), 0.6, 0.06, 0.4, [0.3, 0.6, 0.75], 0.35);
   }
 
+  // 대원(사람) 피격: 방탄복 섬유 파편 + 짙은 붉은 비산 (절제된 표현)
+  playerHit(p, dir) {
+    for (let i = 0; i < 7; i++) this.chips.spawn(p, _v.set(-dir.x * 2 + rnd(1.5), Math.random() * 2, -dir.z * 2 + rnd(1.5)), 0.4 + Math.random() * 0.3, 0.025, 0.015, i % 2 ? [0.18, 0.02, 0.015] : [0.25, 0.23, 0.18], 1);
+    this.smoke.spawn(p, _v.set(rnd(0.2), 0.2, rnd(0.2)), 0.5, 0.06, 0.35, [0.22, 0.05, 0.04], 0.35);
+  }
+
   decal(p, n, size) {
     const m = this.holes[this.holeIdx++ % this.holes.length];
     m.visible = true;

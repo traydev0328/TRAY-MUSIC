@@ -241,8 +241,17 @@ export class Weapons {
       const lvl = G.world.raycast(origin, dir, d.range);
       const maxT = lvl ? lvl.t : d.range;
       const eh = G.enemies.raycast(origin, dir, maxT);
+      // 대전: 상대 플레이어 아바타 판정 (쏜 사람 화면 기준, 방장이 검증)
+      const mh = G.match.pvp ? G.net.raycastMates(origin, dir, eh ? eh.dist : maxT) : null;
       let end;
-      if (eh) {
+      if (mh) {
+        end = mh.point;
+        const fo = d.falloff, k = Math.min(1, Math.max(0, (mh.dist - fo[0]) / (fo[1] - fo[0])));
+        const dmg = d.dmg * (mh.part === 'head' ? Math.min(2, d.headMul) : 1) * (1 - k * (1 - fo[2]));
+        G.net.playerHit(mh.mate.id, dmg, mh.part, dir);
+        hitAny = true; if (mh.part === 'head') headAny = true;
+        G.effects.playerHit(mh.point, dir);
+      } else if (eh) {
         end = eh.point;
         const fo = d.falloff, k = Math.min(1, Math.max(0, (eh.dist - fo[0]) / (fo[1] - fo[0])));
         const mul = (eh.part === 'head' ? d.headMul : eh.part === 'core' ? 1.8 : 1) * (1 - k * (1 - fo[2]));

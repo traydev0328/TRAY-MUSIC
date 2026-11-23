@@ -33,6 +33,7 @@ export class Player {
     this.pos.copy(p); this.vel.set(0, 0, 0); this.yaw = yaw; this.pitch = 0;
     this.hp = this.maxHp; this.alive = true; this.height = STAND; this.G.input.crouch = false;
     this.recoilP = this.recoilY = 0; this.shakeAmt = 0;
+    this.protectT = 0; this.lastBy = null;
   }
 
   get crouch() { return this.height < 1.5; }
@@ -43,8 +44,10 @@ export class Player {
 
   kick(p, y) { this.recoilP += p; this.recoilY += y; this.pitch += p; this.yaw += y; }
 
-  damage(amount, from) {
-    if (!this.alive) return;
+  // by: 피해를 준 플레이어 id (대전 처치 기록용)
+  damage(amount, from, by = null) {
+    if (!this.alive || this.protectT > 0) return;
+    if (by) this.lastBy = by;
     this.hp -= amount;
     this.lastHit = this.G.time;
     this.shake(0.18 + amount * 0.012);
@@ -121,6 +124,7 @@ export class Player {
     const ceil = W.ceilingAt(this.pos.x, this.pos.z, R * 0.8, this.pos.y + this.height - 0.2, this.pos.y + this.height + 0.3);
     if (this.vel.y > 0 && this.pos.y + this.height > ceil) { this.pos.y = ceil - this.height; this.vel.y = 0; }
 
+    if (this.protectT > 0) this.protectT -= dt;
     // ── 체력 재생 ──
     if (this.alive && G.time - this.lastHit > 4.5 && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + 22 * dt);
 

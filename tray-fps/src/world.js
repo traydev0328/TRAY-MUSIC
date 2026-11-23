@@ -1020,7 +1020,14 @@ export class World {
 
   _spawns() {
     const cand = [[52, -52], [55, 0], [55, 54], [22, -54], [-54, 54], [-54, 14], [-52, -54], [0, -52], [40, 28], [-20, 54], [5, -15]];
-    this.spawnPoints = cand.map(([x, z]) => { const [i, j] = this.nearestWalkable(...this.cellOf(x, z)); return this.cellCenter(i, j); });
+    const snap = ([x, z]) => { const [i, j] = this.nearestWalkable(...this.cellOf(x, z)); return this.cellCenter(i, j); };
+    this.spawnPoints = cand.map(snap);
+    // 대전용: 팀 대전은 남쪽(알파)·북쪽(브라보) 진영, 개인전은 맵 전역
+    this.teamSpawns = [
+      [[-14, 51], [-4, 53], [6, 52], [16, 50], [-24, 52]].map(snap),
+      [[-12, -46], [-2, -47], [8, -49], [14, -45], [-8, -54]].map(snap),
+    ];
+    this.ffaSpawns = [...this.spawnPoints, ...this.teamSpawns[0], ...this.teamSpawns[1], snap([-30, -18]), snap([20, 16])];
   }
 
   randomWalkableNear(p, radius) {

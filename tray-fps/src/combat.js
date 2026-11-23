@@ -105,10 +105,10 @@ export class Combat {
       if (!W.lineOfSight(lifted, target)) return 0; // 엄폐물이 폭발을 막는다
       return Math.pow(1 - d / radius, 1.25);
     };
-    if (P.alive) {
+    if (P.alive && !G.match.friendlyFire(owner)) { // 팀 대전에서 아군 폭발은 무해(자기 수류탄은 예외)
       const k = Math.max(probe(P.eye), probe(new THREE.Vector3(P.pos.x, P.pos.y + 0.5, P.pos.z)));
       const self = owner === (G.net.active ? G.net.myId : 'local') ? 0.55 : 1;
-      if (k > 0) P.damage(dmg * 0.55 * k * self, pos.clone());
+      if (k > 0) P.damage(dmg * 0.55 * k * self, pos.clone(), owner === 'enemy' ? null : owner);
     }
     if (!G.authority) return;
     for (const e of G.enemies.list) {

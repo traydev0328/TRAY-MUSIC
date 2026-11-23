@@ -73,22 +73,35 @@ class Teammate {
   get eye() { return new THREE.Vector3(this.p.x, this.p.y + this.h - 0.13, this.p.z); }
   get height() { return this.h; }
   get crouch() { return this.h < 1.5; }
-  ensureAvatar() { if (!this.avatar) { this.avatar = new Operator(this.G, this.p, this.name); this.avatar.pos.copy(this.p); } }
+  ensureAvatar() {
+    if (this.avatar) return;
+    this.avatar = new Operator(this.G, this.p, this.name);
+    this.avatar.pos.copy(this.p);
+    this.avatar.root.userData.mate = this;
+    this.avatar.tag.raycast = () => {}; // 이름표는 사격 판정 제외
+  }
   apply(m) {
     const nx = m[0], ny = m[1], nz = m[2];
     const dt = Math.max(0.03, this.G.time - this.lastU); this.lastU = this.G.time;
     this.speedNow = Math.hypot(nx - this.p.x, nz - this.p.z) / dt;
     this.p.set(nx, ny, nz); this.yaw = m[3]; this.pitch = m[4]; this.h = m[5]; this.hp = m[6]; this.alive = !!m[7];
   }
-  damage(a, from) {
+  damage(a, from, by = null) {
     if (!this.alive) return;
     this.hp = Math.max(0, this.hp - a);
-    this.G.net.sendTo(this.id, { t: 'dmg', a: r2(a), f: this.G.net.v3(from) });
+    this.G.net.sendTo(this.id, { t: 'dmg', a: r2(a), f: this.G.net.v3(from), ...(by ? { by } : {}) });
   }
   update() {
     if (!this.avatar) return;
     const A = this.avatar;
     A.netPos.copy(this.p); A.netYaw = this.yaw + Math.PI; A.netPitch = this.pitch; A.netH = this.h; A.netAlive = this.alive;
+    // 피아 식별: 아군은 초록 표지 + 이름표, 적은 붉은 표지 + 이름표 숨김(벽 너머로 보이지 않게)
+    const foe = this.G.match.isEnemy(this.id);
+    if (A.foe !== foe) {
+      A.foe = foe;
+      A.visorMat.color.setRGB(foe ? 3.5 : 0.25, foe ? 0.25 : 1.6, foe ? 0.15 : 0.5);
+    }
+    A.tag.visible = !foe;
   }
   dispose() { if (this.avatar) this.avatar.dispose(); this.avatar = null; }
 }
@@ -104,6 +117,9 @@ export class Net {
     this.players = [];
     this.onLobby = () => {};
     this.hud = { wave: 0, left: 0, score: 0 };
+    this.lobbyMode = 'coop';
+    this.teams = new Map();
+    this.ray = new THREE.Raycaster();
   }
 
   get active() { return this.mode !== 'off'; }
@@ -180,11 +196,25 @@ export class Net {
   }
 
   _lobby() {
-    this.players = [{ id: this.myId, name: this.name, host: true }, ...[...this.peers.values()].map((p) => ({ id: p.id, name: p.name }))];
-    this.broadcast({ t: 'lobby', players: this.players, code: this.code });
+    const ids = [this.myId, ...this.peers.keys()];
+    for (const id of [...this.teams.keys()]) if (!ids.includes(id)) this.teams.delete(id);
+    for (const id of ids) if (!this.teams.has(id)) {
+      const n0 = [...this.teams.values()].filter((t) => t === 0).length, n1 = this.teams.size - n0;
+      this.teams.set(id, n0 <= n1 ? 0 : 1); // 인원이 적은 팀으로 자동 배정
+    }
+    this.players = [{ id: this.myId, name: this.name, host: true, team: this.teams.get(this.myId) }, ...[...this.peers.values()].map((p) => ({ id: p.id, name: p.name, team: this.teams.get(p.id) }))];
+    this.broadcast({ t: 'lobby', players: this.players, code: this.code, mode: this.lobbyMode });
     this._syncMates(this.players);
     this.onLobby();
   }
+
+  setMode(mode) { if (!this.isHost) return; this.lobbyMode = mode; this._lobby(); }
+  switchTeam(id) {
+    if (!this.isHost) { this.sendHost({ t: 'team' }); return; }
+    this.teams.set(id, this.teams.get(id) === 1 ? 0 : 1); this._lobby();
+    if (this.G.state === 'playing') { this.G.match.teams = new Map(this.teams); this.broadcast({ t: 'teams', teams: [...this.teams] }); }
+  }
+  startMsg(idx) { return { t: 'start', idx, mode: this.lobbyMode, teams: [...this.teams] }; }
 
   _fromClient(pid, m) {
     const G = this.G, P = this.peers.get(pid);
@@ -193,7 +223,7 @@ export class Net {
       case 'hello':
         P.name = String(m.name || '대원').replace(/[<>&]/g, '').slice(0, 12) || '대원';
         this._lobby();
-        if (G.state === 'playing') this.sendTo(pid, { t: 'start', mid: 1, idx: this.players.findIndex((p) => p.id === pid) });
+        if (G.state === 'playing') { G.match.teams = new Map(this.teams); this.broadcast({ t: 'teams', teams: [...this.teams] }, pid); this.sendTo(pid, { ...this.startMsg(this.players.findIndex((p) => p.id === pid)), mid: 1, mode: G.match.mode }); G.match.broadcastScore(); }
         break;
       case 'u': { const mt = this.mates.get(pid); if (mt) mt.apply(m.s); break; }
       case 'hit': {
@@ -207,7 +237,13 @@ export class Net {
       case 'shot': this.broadcast({ ...m, id: pid }, pid); this._remoteShot(pid, m); break;
       case 'gren': G.combat.throwGrenade(this.V(m.p), this.V(m.v), pid, m.f); this.broadcast({ ...m, o: pid }, pid); break;
       case 'propHit': { const rec = G.world.explosives[m.i]; if (rec) G.combat.damageProp(rec, m.d, pid); break; }
-      case 'dead': { const mt = this.mates.get(pid); if (mt) mt.alive = false; G.hud.feed(`${P.name} 전사`, 0); this.broadcast({ t: 'feed', txt: `${P.name} 전사`, pts: 0 }, pid); G.checkAllDead(); break; }
+      case 'dead': {
+        const mt = this.mates.get(pid); if (mt) mt.alive = false;
+        if (G.match.pvp) { G.match.recordKill(pid, m.by || null); break; }
+        G.hud.feed(`${P.name} 전사`, 0); this.broadcast({ t: 'feed', txt: `${P.name} 전사`, pts: 0 }, pid); G.checkAllDead(); break;
+      }
+      case 'phit': this._applyPlayerHit(pid, m.v, m.d, m.p); break;
+      case 'team': if (G.state !== 'playing') this.switchTeam(pid); break;
     }
   }
 
@@ -245,13 +281,16 @@ export class Net {
     const G = this.G;
     if (!m || typeof m !== 'object') return;
     switch (m.t) {
-      case 'lobby': this.players = m.players; this._syncMates(m.players); this.onLobby(); break;
+      case 'lobby': this.players = m.players; this.lobbyMode = m.mode || 'coop'; this.teams = new Map(m.players.map((p) => [p.id, p.team || 0])); this._syncMates(m.players); this.onLobby(); break;
+      case 'teams': this.teams = new Map(m.teams); G.match.teams = new Map(m.teams); break;
+      case 'pscore': G.match.applyScore(m); break;
+      case 'mend': G.match.over = true; G.matchEnd(m); break;
       case 'full': this.close(); G.netLost('방이 가득 찼습니다 (최대 4명).'); break;
       case 'start': G.netStart(m); break;
       case 's': this._applySnap(m); break;
       case 'kill': G.enemies.puppetKill(m.id, this.V(m.d), !!m.h); if (m.by === this.myId) { G.hud.hitmarker(true); } break;
       case 'efire': { const e = G.enemies.byId.get(m.id); if (e && e.alive) e.netFire(this.V(m.f), this.V(m.e)); break; }
-      case 'dmg': G.player.damage(m.a, this.V(m.f)); break;
+      case 'dmg': G.player.damage(m.a, this.V(m.f), m.by || null); break;
       case 'hitm': G.audio.hitmarker(true, !!m.h); G.creditKill(this.myId, !!m.h); break;
       case 'grant': G.grant(m.k); break;
       case 'pk+': G.pickups.netAdd(m); break;
@@ -269,6 +308,7 @@ export class Net {
   _applySnap(m) {
     const G = this.G;
     this.hud.wave = m.w; this.hud.left = m.l; this.hud.score = m.sc;
+    if (typeof m.tm === 'number') G.match.timeLeft = m.tm;
     G.wave = m.w; G.score = m.sc;
     for (const e of m.e) G.enemies.syncPuppet(e[0], TYPE_KEYS[e[1]], e[2], e[3], e[4], e[5], e[6]);
     for (const p of m.p) {
@@ -297,6 +337,37 @@ export class Net {
     if (m.s && m.n) this.G.effects.impact(end, this.V(m.n), m.s);
   }
 
+  // ─────────── 대전: 플레이어 판정 ───────────
+  raycastMates(origin, dir, maxT) {
+    const roots = [];
+    for (const m of this.mates.values()) if (m.alive && m.avatar && this.G.match.isEnemy(m.id)) { m.avatar.root.updateMatrixWorld(true); roots.push(m.avatar.root); }
+    if (!roots.length) return null;
+    this.ray.set(origin, dir); this.ray.far = maxT;
+    for (const h of this.ray.intersectObjects(roots, true)) {
+      let o = h.object; while (o && !o.userData.mate) o = o.parent;
+      if (o) return { mate: o.userData.mate, part: h.object.userData.part || 'body', point: h.point, dist: h.distance };
+    }
+    return null;
+  }
+
+  // 내가 상대를 맞힘 → 방장이 검증 후 피해 적용
+  playerHit(victimId, dmg, part, dir) {
+    if (this.isHost) this._applyPlayerHit(this.myId, victimId, dmg, part);
+    else this.sendHost({ t: 'phit', v: victimId, d: r2(dmg), p: part, dir: this.v3(dir) });
+  }
+
+  _applyPlayerHit(by, victimId, dmg, part) {
+    const G = this.G, M = G.match;
+    if (!M.pvp || M.over || typeof dmg !== 'number' || dmg <= 0) return;
+    const shooter = G.targetById(by), victim = G.targetById(victimId);
+    if (!shooter || !victim || !shooter.alive || !victim.alive || by === victimId) return;
+    if (M.mode === 'tdm' && M.teamOf(by) === M.teamOf(victimId)) return; // 아군 사격 무효
+    if (shooter.pos.distanceTo(victim.pos) > 250) return; // 비정상 거리
+    const a = Math.min(dmg, 80);
+    if (victim.isLocal) G.player.damage(a, shooter.pos.clone(), by);
+    else victim.damage(a, shooter.pos.clone(), by);
+  }
+
   // ─────────── 전송 ───────────
   _send(conn, msg) { try { if (conn && conn.open) conn.send(msg); } catch (e) { /* 연결 종료 중 */ } }
   sendHost(msg) { this._send(this.evt, msg); }
@@ -320,7 +391,7 @@ export class Net {
     if (this.isHost) {
       const e = G.enemies.list.filter((x) => x.alive).map((x) => [x.id, TYPE_KEYS.indexOf(x.type), r2(x.pos.x), r2(x.pos.y), r2(x.pos.z), r2(x.yaw), x.canSee ? 1 : 0]);
       const p = [[this.myId, ...me], ...[...this.mates.values()].map((m) => [m.id, r2(m.p.x), r2(m.p.y), r2(m.p.z), r2(m.yaw), r2(m.pitch), r2(m.h), Math.round(m.hp), m.alive ? 1 : 0])];
-      this.broadcastU({ t: 's', w: G.wave, l: G.waves.remaining(), sc: G.score, e, p });
+      this.broadcastU({ t: 's', w: G.wave, l: G.waves.remaining(), sc: G.score, tm: Math.round(G.match.timeLeft), e, p });
     } else {
       this._send(this.st && this.st.open ? this.st : this.evt, { t: 'u', s: me });
       // 오래 갱신되지 않은 퍼펫 정리

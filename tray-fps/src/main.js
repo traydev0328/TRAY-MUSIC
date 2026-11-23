@@ -12,6 +12,7 @@ import { Enemies } from './enemies.js';
 import { Combat } from './combat.js';
 import { Net } from './net.js';
 import { Post } from './post.js';
+import { Match, MODES, TEAM_NAMES } from './pvp.js';
 
 const $ = (id) => document.getElementById(id);
 const G = window.__G = { settings, state: 'loading', time: 0, wave: 0, score: 0 };
@@ -55,10 +56,18 @@ class Hud {
       $('wpn-name').textContent = `${W.def.name} · ${W.def.cal}`;
     });
     this.set('gren', G.combat.playerGrenades, (v) => { $('gren-n').textContent = v; $('b-gren') && $('b-gren').classList.toggle('dim', v <= 0); });
-    this.set('wave', G.wave, (v) => { $('wave-n').textContent = String(v).padStart(2, '0'); });
-    const left = G.net.isClient ? G.net.hud.left : G.waves.remaining();
-    this.set('left', left, (v) => { $('wave-left').textContent = v; });
-    this.set('score', G.score, (v) => { $('score').textContent = v.toLocaleString('ko-KR'); });
+    const pvp = G.match.pvp;
+    this.set('pvp', pvp, (v) => { $('wave-line').hidden = v; $('mode-line').hidden = !v; });
+    if (pvp) {
+      this.set('mline', G.match.hudLine(), (v) => { $('mode-line').innerHTML = v; });
+      const st = G.match.stat(G.match.me);
+      this.set('score', `K ${st.kills} · D ${st.deaths}`, (v) => { $('score').textContent = v; });
+    } else {
+      this.set('wave', G.wave, (v) => { $('wave-n').textContent = String(v).padStart(2, '0'); });
+      const left = G.net.isClient ? G.net.hud.left : G.waves.remaining();
+      this.set('left', left, (v) => { $('wave-left').textContent = v; });
+      this.set('score', G.score, (v) => { $('score').textContent = v.toLocaleString('ko-KR'); });
+    }
     const deg = ((-P.yaw * 180 / Math.PI) % 360 + 360) % 360;
     const w = this.strip.parentElement.clientWidth;
     this.strip.style.transform = `translateX(${(w / 2 - (24 + deg / 15) * 30 - 15).toFixed(1)}px)`;
@@ -76,7 +85,7 @@ class Hud {
     if (rl) $('reload-bar').style.transform = `scaleX(${Math.min(1, W.reloadT / W.def.reload)})`;
     this.set('ads', G.input.ads, (v) => $('b-ads') && $('b-ads').classList.toggle('on', v));
     this.set('crouch', G.input.crouch, (v) => $('b-crouch') && $('b-crouch').classList.toggle('on', v));
-    this.set('dead', !P.alive && G.net.active && G.state === 'playing', (v) => { $('down').hidden = !v; });
+    this.set('dead', !P.alive && G.net.active && G.state === 'playing', (v) => { $('down').hidden = !v; if (v && !G.match.pvp) this.setDown('아군을 관전 중 · 웨이브가 끝나면 재투입됩니다'); });
     // 아군 상태 (멀티)
     this.teamT -= dt;
     if (this.teamT <= 0) {
@@ -85,6 +94,7 @@ class Hud {
       this.set('team', html, (v) => { $('team').innerHTML = v; });
     }
   }
+  setDown(text) { const el = $('down-sub'); if (el.textContent !== text) el.textContent = text; }
   hitmarker(kill) { const h = $('hit'); h.classList.remove('show', 'kill'); void h.offsetWidth; h.classList.add('show'); if (kill) h.classList.add('kill'); }
   damage(from, amount) {
     const P = this.G.player;
@@ -154,6 +164,15 @@ class Pickups {
     g.position.copy(pos);
     this.G.scene.add(g);
     this.list.push({ id, g, m, type, life: 35, t: Math.random() * 6 });
+  }
+  // 대전용 고정 보급품 (만료 없음)
+  spawnFixed(type, pos) {
+    pos.y = this.G.world.groundAt(pos.x, pos.z, 0.2, 3) + 0.35;
+    const id = this.nextId++;
+    this._add(id, type, pos);
+    this.list[this.list.length - 1].life = Infinity;
+    if (this.G.net.isHost) this.G.net.broadcast({ t: 'pk+', id, k: type, p: this.G.net.v3(pos) });
+    return id;
   }
   netAdd(msg) { this._add(msg.id, msg.k, this.G.net.V(msg.p)); }
   netRemove(id) { const i = this.list.findIndex((p) => p.id === id); if (i >= 0) { this.list[i].g.removeFromParent(); this.list.splice(i, 1); } }
@@ -264,6 +283,7 @@ async function boot() {
   G.audio.volume = settings.volume;
   G.input = new Input(G);
   G.net = new Net(G);
+  G.match = new Match(G);
 
   // 실사 에셋 (약 9.7MB) — 실패한 항목은 절차적 대체물 사용
   G.assets = new Assets(renderer);
@@ -368,12 +388,14 @@ function startGame(spawnIdx = 0) {
   G.weapons.reset();
   const sp = G.world.playerSpawn.clone().add(new THREE.Vector3((spawnIdx % 4) * 1.6 - 2.4, 0, Math.floor(spawnIdx / 4) * 1.6));
   G.player.spawn(sp, 0);
+  if (!G.net.active) G.match.reset('coop');
   G.enemies.kills = 0; G.enemies.headshots = 0; G.kills.clear();
   G.score = 0;
   G.waves.reset();
   G.input.reset(); G.input.ads = false; G.input.crouch = false;
   G.input.enabled = true; G.overlay = false;
   if (G.net.active) G.net.spawnMates();
+  if (G.match.pvp) { G.match.respawn(); G.waves.inter = -1; G.hud.banner(MODES[G.match.mode].name, G.match.mode === 'tdm' ? `${TEAM_NAMES[G.match.teamOf(G.match.me)]} 팀 · 먼저 ${MODES.tdm.limit}킬` : `먼저 ${MODES.ffa.limit}킬 달성`); }
   hideScreens(); show('hud', true); show('controls', IS_TOUCH);
   G.post.vmPass.enabled = true;
   G.state = 'playing';
@@ -404,6 +426,12 @@ G.addScore = (n) => { G.score += n; };
 G.onLocalDeath = () => {
   if (!G.net.active) { G.gameOver(); return; }
   G.input.reset();
+  if (G.match.pvp) {
+    G.match.onLocalDeath();
+    if (G.net.isClient) G.net.sendHost({ t: 'dead', by: G.player.lastBy });
+    else G.match.recordKill(G.net.myId, G.player.lastBy);
+    return;
+  }
   G.hud.feed(`${G.net.name} 전사`, 0);
   if (G.net.isClient) G.net.sendHost({ t: 'dead' });
   else { G.net.broadcast({ t: 'feed', txt: `${G.net.name} 전사`, pts: 0 }); G.checkAllDead(); }
@@ -435,6 +463,7 @@ G.gameOver = (mp = null) => {
   const st = G.weapons.stats;
   const me = G.kills.get(G.net.active ? G.net.myId : 'local') || { kills: 0, heads: 0 };
   $('go-title').textContent = mp ? '분대 전멸 · KIA' : newBest ? '신기록 · KIA' : 'KIA · 전사';
+  $('go-eyebrow').textContent = '작전 종료'; $('go-stats').hidden = false; $('btn-retry').textContent = '다시 출격';
   $('go-score').textContent = G.score.toLocaleString('ko-KR');
   $('go-wave').textContent = G.wave;
   $('go-kills').textContent = G.net.isClient ? me.kills : G.enemies.kills;
@@ -447,9 +476,23 @@ G.gameOver = (mp = null) => {
   setTimeout(() => { if (G.state === 'gameover') { show('gameover', true); show('controls', false); } }, 1400);
 };
 
+// 대전 종료 결과 화면
+G.matchEnd = (res) => {
+  G.state = 'gameover';
+  G.input.reset(); G.input.enabled = false; G.input.exitLock();
+  $('go-title').textContent = res.title;
+  $('go-eyebrow').textContent = `${MODES[res.mode] ? MODES[res.mode].name : '대전'} 종료`;
+  $('go-stats').hidden = true;
+  $('go-team').innerHTML = res.players.map((p, i) => `<div><span>${i + 1}. ${esc(p.name)}${res.mode === 'tdm' ? ` <em>${TEAM_NAMES[p.team]}</em>` : ''}</span><b>${p.kills}킬 · ${p.deaths}데스</b></div>`).join('');
+  $('btn-retry').hidden = G.net.isClient; $('btn-retry').textContent = '재대결';
+  $('go-wait').hidden = !G.net.isClient;
+  setTimeout(() => { if (G.state === 'gameover') { show('gameover', true); show('controls', false); } }, 1200);
+};
+
 // 참가자: 방장이 시작 신호를 보냄
 G.netStart = (m) => {
   hideScreens();
+  G.match.reset(m.mode || 'coop', m.teams);
   startGame(typeof m.idx === 'number' ? m.idx : Math.max(0, G.net.players.findIndex((p) => p.id === G.net.myId)));
   if (m.mid) G.hud.banner('작전 합류', '진행 중인 작전에 합류했습니다');
 };
@@ -529,14 +572,20 @@ function renderLobby() {
   $('lobby-room').hidden = !inRoom;
   if (!inRoom) return;
   $('lobby-code-big').textContent = N.code || '-----';
-  $('lobby-players').innerHTML = N.players.map((p) => `<li>${esc(p.name)}${p.host ? ' <em>방장</em>' : ''}${p.id === N.myId ? ' <em>나</em>' : ''}</li>`).join('');
+  const tdm = N.lobbyMode === 'tdm';
+  $('lobby-players').innerHTML = N.players.map((p) => `<li class="${tdm ? `t${p.team || 0}` : ''}">${esc(p.name)}${tdm ? ` <em>${TEAM_NAMES[p.team || 0]}</em>` : ''}${p.host ? ' <em>방장</em>' : ''}${p.id === N.myId ? ' <em>나</em>' : ''}</li>`).join('');
+  document.querySelectorAll('#seg-mode button').forEach((b) => { b.classList.toggle('on', b.dataset.m === N.lobbyMode); b.disabled = !N.isHost; });
+  $('btn-team').hidden = !tdm;
+  $('lobby-mode-note').textContent = N.lobbyMode === 'coop' ? '함께 안드로이드 웨이브를 막습니다.' : tdm ? `2팀으로 나뉘어 먼저 ${MODES.tdm.limit}킬을 달성하면 승리 · 제한 8분` : `모두가 적 · 먼저 ${MODES.ffa.limit}킬을 달성하면 승리 · 제한 8분`;
   $('btn-go').hidden = !N.isHost;
   $('lobby-wait').hidden = N.isHost;
   $('lobby-count').textContent = `${N.players.length} / 4`;
 }
 function hostStart() {
   const N = G.net;
-  N.players.forEach((p, i) => { if (p.id !== N.myId) N.sendTo(p.id, { t: 'start', idx: i }); });
+  if (N.lobbyMode !== 'coop' && N.players.length < 2) { setLobbyStatus('대전 모드는 2명 이상이 필요합니다.', true); return; }
+  G.match.reset(N.lobbyMode, [...N.teams]);
+  N.players.forEach((p, i) => { if (p.id !== N.myId) N.sendTo(p.id, N.startMsg(i)); });
   startGame(0);
 }
 function setupLobby() {
@@ -555,6 +604,8 @@ function setupLobby() {
     catch (e) { G.net.close(); setLobbyStatus(e.message, true); }
   });
   tap('btn-go', () => hostStart());
+  tap('btn-team', () => G.net.switchTeam(G.net.myId));
+  document.querySelectorAll('#seg-mode button').forEach((b) => b.addEventListener('click', () => G.net.setMode(b.dataset.m)));
   tap('btn-lobby-leave', () => { G.net.close(); renderLobby(); setLobbyStatus(''); });
   tap('btn-lobby-back', () => { G.net.close(); showMenu(); });
   tap('btn-copy', async () => {
@@ -589,9 +640,10 @@ function frame(now) {
   if (G.state === 'playing' || G.state === 'gameover') {
     if (G.state === 'playing') {
       if (G.player.alive) { G.player.update(dt); G.weapons.update(dt); }
-      else if (G.net.active) spectateCam(dt);
+      else if (G.net.active && !G.match.pvp) spectateCam(dt);
       else { const c = G.camera; c.position.y = Math.max(G.player.pos.y + 0.3, c.position.y - dt * 1.4); }
-      if (G.authority) G.waves.update(dt);
+      if (G.authority && !G.match.pvp) G.waves.update(dt);
+      G.match.update(dt);
       G.combat.update(dt);
     } else {
       const c = G.camera; c.position.y = Math.max(G.player.pos.y + 0.3, c.position.y - dt * 1.4);
