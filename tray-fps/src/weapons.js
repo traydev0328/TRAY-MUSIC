@@ -60,13 +60,13 @@ export class Weapons {
 
   // 선택된 실사 총기 모델을 필요할 때만 받아서 준비
   // 동시에 여러 번 불려도 순서대로 처리 (게임 시작과 장비 변경이 겹칠 때의 경쟁 상태 방지)
-  prepareLoadout() {
-    this._prep = (this._prep || Promise.resolve()).then(() => this._prepareLoadout()).catch((e) => console.warn('loadout', e));
+  prepareLoadout(ids) {
+    this._prep = (this._prep || Promise.resolve()).then(() => this._prepareLoadout(ids)).catch((e) => console.warn('loadout', e));
     return this._prep;
   }
 
-  async _prepareLoadout() {
-    this.order = this.loadout();
+  async _prepareLoadout(ids) {
+    this.order = ids || this.loadout();
     for (const id of this.order) {
       if (this.models[id]) continue;
       const d = WEAPONS[id];
@@ -78,7 +78,7 @@ export class Weapons {
       this.models[id] = m;
     }
     // 끝난 시점의 최신 선택 기준으로 확정. 모델을 못 받은 무기만 기본 총으로 대체
-    this.order = this.loadout().map((id) => (this.models[id] ? id : (WEAPONS[id].slot === 2 ? 'shotgun' : 'rifle')));
+    this.order = (ids || this.loadout()).map((id) => (this.models[id] ? id : (WEAPONS[id].slot === 2 ? 'shotgun' : 'rifle')));
   }
 
   reset() {

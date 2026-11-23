@@ -194,6 +194,14 @@ input[type=range] { width: 150px; accent-color: var(--amber); }
 #scope .h { left: 14%; right: 14%; top: 50%; height: 1.5px; margin-top: -0.75px; }
 #scope .v { top: 14%; bottom: 14%; left: 50%; width: 1.5px; margin-left: -0.75px; }
 #scope .dot { left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px; border-radius: 50%; background: #d11; }
+#act-prog { position: fixed; left: 50%; top: 62%; transform: translateX(-50%); z-index: 3; text-align: center; font-size: 12px; color: var(--amber); letter-spacing: 0.1em; }
+#act-prog div { width: 180px; height: 4px; background: var(--ink-faint); margin-top: 5px; }
+#act-prog i { display: block; height: 100%; background: var(--amber); transform-origin: left; }
+.buy { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 6; width: min(720px, 94vw); max-height: 80vh; overflow-y: auto; background: rgba(13,14,16,0.93); border: 1px solid var(--ink-faint); padding: 14px; }
+.buy-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; } .buy-head b { font-family: var(--f-display); font-size: 18px; letter-spacing: 0.2em; } .buy-head span { color: var(--amber); font-family: var(--f-display); font-size: 16px; flex: 1; }
+.buy .arm-grid button b { display: block; color: var(--amber); font-family: var(--f-display); font-size: 11px; margin-top: 2px; } .buy .arm-grid button:disabled { opacity: 0.35; }
+.b-use { width: 52px; height: 52px; right: calc(250px + var(--sr)); bottom: calc(160px + var(--sb)); }
+.b-buy { width: 46px; height: 46px; left: calc(36px + var(--sl)); bottom: calc(280px + var(--sb)); }
 .map-pick { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--ink-dim); }
 .gfx-box { border-top: 1px solid var(--ink-faint); padding-top: 10px; }
 .gfx-box summary { cursor: pointer; font-size: 13px; color: var(--ink-dim); margin-bottom: 8px; }
@@ -249,6 +257,8 @@ input[type=range] { width: 150px; accent-color: var(--amber); }
   <div class="fps" id="fps" hidden></div>
 </div>
 
+<div id="act-prog" hidden><span id="act-prog-label">설치 중</span><div><i id="act-prog-bar"></i></div></div>
+<section id="buy" class="buy" hidden><div class="buy-head"><b>구매</b><span id="buy-credits">₩ 800</span><button class="btn" data-act="buy" id="btn-buy-close">닫기 (B)</button></div><div class="arm-grid" id="buy-list"></div></section>
 <div id="scope" hidden><i class="h"></i><i class="v"></i><i class="dot"></i></div>
 <div id="controls" hidden>
   <div class="joy-hint">MOVE</div>
@@ -258,6 +268,8 @@ input[type=range] { width: 150px; accent-color: var(--amber); }
   <button class="tbtn b-ads" data-act="ads" id="b-ads" aria-label="정조준">조준</button>
   <button class="tbtn b-crouch" data-act="crouch" id="b-crouch" aria-label="앉기"><svg viewBox="0 0 24 24"><path d="M5 19h14M8 19l3-6 4 1 2-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="6" r="2" fill="currentColor"/></svg></button>
   <button class="tbtn b-jump" data-act="jump" aria-label="점프"><svg viewBox="0 0 24 24"><path d="M6 14l6-6 6 6M6 19l6-6 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+  <button class="tbtn b-use" data-act="use" aria-label="설치·해체">작업</button>
+  <button class="tbtn b-buy" data-act="buy" aria-label="구매">구매</button>
   <button class="tbtn b-gren" data-act="grenade" id="b-gren" aria-label="수류탄"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="15" rx="6" ry="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10 8.5V5h4v3.5M14 6l4-2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
   <button class="tbtn b-reload" data-act="reload" aria-label="재장전"><svg viewBox="0 0 24 24"><path d="M19 12a7 7 0 1 1-2.05-4.95M19 4v4h-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
 </div>
@@ -278,6 +290,7 @@ input[type=range] { width: 150px; accent-color: var(--amber); }
     <p class="lede">폭우가 쏟아지는 해 질 녘 제7 항만 물류 기지. 통제를 벗어난 전투 안드로이드와 공격 드론이 몰려옵니다. 버틸 수 있는 데까지 버티세요.</p>
     <div class="btn-row">
       <button class="btn primary" id="btn-start">싱글 작전</button>
+      <button class="btn" id="btn-bomb">폭파 작전 5대5</button>
       <button class="btn" id="btn-multi">멀티 협동</button>
       <button class="btn" id="btn-settings">설정</button>
     </div>
@@ -294,7 +307,7 @@ input[type=range] { width: 150px; accent-color: var(--amber); }
       <div>그래픽<b id="menu-quality">높음</b></div>
     </div>
     <div class="credit">실사 대원·M16: "S.W.A.T. Operator - Remastered", "FSB Operator", "M16 Assault Rifle" by jeandiz 외 총기 12종 제작자(assets/CREDITS.md) · Sketchfab · CC BY 4.0 · 환경 에셋: Poly Haven (CC0)</div>
-    <div class="keys" id="keys-desktop"><kbd>WASD</kbd>이동 <kbd>마우스</kbd>조준·사격 <kbd>우클릭</kbd>정조준 <kbd>Shift</kbd>질주 <kbd>Space</kbd>점프 <kbd>C</kbd>앉기(앉아서 조준 = 엄폐 사격) <kbd>R</kbd>재장전 <kbd>G</kbd>수류탄 <kbd>Q</kbd>무기 교체 <kbd>Esc</kbd>일시정지</div>
+    <div class="keys" id="keys-desktop"><kbd>WASD</kbd>이동 <kbd>마우스</kbd>조준·사격 <kbd>우클릭</kbd>정조준 <kbd>Shift</kbd>질주 <kbd>Space</kbd>점프 <kbd>C</kbd>앉기(앉아서 조준 = 엄폐 사격) <kbd>R</kbd>재장전 <kbd>G</kbd>수류탄 <kbd>F</kbd>설치·해체(누르고 있기) <kbd>B</kbd>구매 <kbd>Q</kbd>무기 교체 <kbd>Esc</kbd>일시정지</div>
     <div class="keys" id="keys-touch" hidden>왼쪽 화면 드래그: 이동 (끝까지 밀면 질주) · 오른쪽 화면 드래그: 시점 · 사격 버튼을 누른 채 드래그하면 조준하며 사격 · 탄약 표시를 누르면 무기 교체 · 앉은 채 조준하면 엄폐물 위로 고개를 내밀어 사격</div>
   </div>
 </section>

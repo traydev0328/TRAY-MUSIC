@@ -122,11 +122,13 @@ export class Input {
       if (k === 'Space') { this.edges.add('jump'); e.preventDefault(); }
       if (k === 'KeyR') this.edges.add('reload');
       if (k === 'KeyG') this.edges.add('grenade');
+      if (k === 'KeyF') this.use = true;
+      if (k === 'KeyB') this.edges.add('buy');
       if (k === 'KeyQ' || k === 'Digit1' || k === 'Digit2') this.edges.add(k === 'Digit1' ? 'slot1' : k === 'Digit2' ? 'slot2' : 'swap');
       if (k === 'KeyC' || k === 'ControlLeft') this.crouch = !this.crouch;
       this._keysToMove();
     });
-    window.addEventListener('keyup', (e) => { this.keys.delete(e.code); this._keysToMove(); });
+    window.addEventListener('keyup', (e) => { this.keys.delete(e.code); if (e.code === 'KeyF') this.use = false; this._keysToMove(); });
     window.addEventListener('blur', () => { this.keys.clear(); this._keysToMove(); this.fire = false; this.mouseFire = false; });
     window.addEventListener('wheel', (e) => { if (this.enabled) this.edges.add('swap'); }, { passive: true });
   }
@@ -187,6 +189,8 @@ export class Input {
       case 'reload': if (down) this.edges.add('reload'); break;
       case 'swap': if (down) this.edges.add('swap'); break;
       case 'grenade': if (down) this.edges.add('grenade'); break;
+      case 'use': this.use = down; break;
+      case 'buy': if (down) this.edges.add('buy'); break;
       case 'pause': if (down) this.G.pause(); break;
     }
   }

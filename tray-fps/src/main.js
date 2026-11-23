@@ -14,6 +14,7 @@ import { Combat } from './combat.js';
 import { Net } from './net.js';
 import { Post } from './post.js';
 import { Match, MODES, TEAM_NAMES } from './pvp.js';
+import { BombMode } from './bomb.js';
 
 const $ = (id) => document.getElementById(id);
 const G = window.__G = { settings, state: 'loading', time: 0, wave: 0, score: 0 };
@@ -57,9 +58,10 @@ class Hud {
       $('wpn-name').textContent = `${W.def.name} · ${W.def.cal}`;
     });
     this.set('gren', G.combat.playerGrenades, (v) => { $('gren-n').textContent = v; $('b-gren') && $('b-gren').classList.toggle('dim', v <= 0); });
-    const pvp = G.match.pvp;
+    const pvp = G.match.pvp || G.bomb.active;
     this.set('pvp', pvp, (v) => { $('wave-line').hidden = v; $('mode-line').hidden = !v; });
-    if (pvp) {
+    if (G.bomb.active) { /* 모드 줄은 BombMode 가 갱신 */ }
+    else if (pvp) {
       this.set('mline', G.match.hudLine(), (v) => { $('mode-line').innerHTML = v; });
       const st = G.match.stat(G.match.me);
       this.set('score', `K ${st.kills} · D ${st.deaths}`, (v) => { $('score').textContent = v; });
@@ -86,7 +88,7 @@ class Hud {
     if (rl) $('reload-bar').style.transform = `scaleX(${Math.min(1, W.reloadT / W.def.reload)})`;
     this.set('ads', G.input.ads, (v) => $('b-ads') && $('b-ads').classList.toggle('on', v));
     this.set('crouch', G.input.crouch, (v) => $('b-crouch') && $('b-crouch').classList.toggle('on', v));
-    this.set('dead', !P.alive && G.net.active && G.state === 'playing', (v) => { $('down').hidden = !v; if (v && !G.match.pvp) this.setDown('아군을 관전 중 · 웨이브가 끝나면 재투입됩니다'); });
+    this.set('dead', !P.alive && (G.net.active || G.bomb.active) && G.state === 'playing', (v) => { $('down').hidden = !v; if (v && !G.match.pvp) this.setDown('아군을 관전 중 · 웨이브가 끝나면 재투입됩니다'); });
     // 아군 상태 (멀티)
     this.teamT -= dt;
     if (this.teamT <= 0) {
@@ -94,6 +96,11 @@ class Hud {
       const html = G.net.active ? [...G.net.mates.values()].map((m) => `<div class="mate${m.alive ? '' : ' down'}"><span>${esc(m.name)}</span><i><b style="transform:scaleX(${Math.max(0, m.hp) / 100})"></b></i></div>`).join('') : '';
       this.set('team', html, (v) => { $('team').innerHTML = v; });
     }
+  }
+  setModeLine(html) { this.set('mline', html, (v) => { $('mode-line').innerHTML = v; }); }
+  setProgress(p, label) {
+    const el = $('act-prog');
+    this.set('prog', p < 0 ? -1 : Math.round(p * 50), () => { el.hidden = p < 0; if (p >= 0) { $('act-prog-bar').style.transform = `scaleX(${Math.min(1, p)})`; $('act-prog-label').textContent = label; } });
   }
   setDown(text) { const el = $('down-sub'); if (el.textContent !== text) el.textContent = text; }
   hitmarker(kill) { const h = $('hit'); h.classList.remove('show', 'kill'); void h.offsetWidth; h.classList.add('show'); if (kill) h.classList.add('kill'); }
@@ -285,6 +292,7 @@ async function boot() {
   G.input = new Input(G);
   G.net = new Net(G);
   G.match = new Match(G);
+  G.bomb = new BombMode(G);
 
   // 실사 에셋 (약 9.7MB) — 실패한 항목은 절차적 대체물 사용
   G.assets = new Assets(renderer);
@@ -470,6 +478,7 @@ G.resume = () => {
 G.addScore = (n) => { G.score += n; };
 
 G.onLocalDeath = () => {
+  if (G.bomb.active) { G.bomb.onPlayerDeath(); G.input.reset(); G.hud.feed('전사 · 다음 라운드에 재투입', 0); return; }
   if (!G.net.active) { G.gameOver(); return; }
   G.input.reset();
   if (G.match.pvp) {
@@ -557,10 +566,11 @@ function checkOrientation() {
 // ───────────── 메뉴/설정 ─────────────
 function setupMenus() {
   const tap = (id, fn) => $(id).addEventListener('click', (e) => { e.preventDefault(); fn(); });
-  tap('btn-start', () => { if (G.net.active) G.net.close(); startGame(); });
+  tap('btn-start', () => { if (G.net.active) G.net.close(); G.bomb.stop(); startGame(); });
+  tap('btn-bomb', async () => { if (G.net.active) G.net.close(); G.match.reset('coop'); await startGame(); G.waves.inter = -1; G.waves.queue = []; G.enemies.clear(); G.bomb.start(); });
   tap('btn-multi', () => openLobby());
   tap('btn-retry', () => { if (G.net.isHost) hostStart(); else startGame(); });
-  const toMenu = () => { if (G.net.active) G.net.close(); G.enemies.clear(); G.pickups.clear(); G.combat.reset(); G.state = 'menu'; showMenu(); };
+  const toMenu = () => { G.bomb.stop(); document.getElementById('buy').hidden = true; if (G.net.active) G.net.close(); G.enemies.clear(); G.pickups.clear(); G.combat.reset(); G.state = 'menu'; showMenu(); };
   tap('btn-menu', toMenu);
   tap('btn-quit', toMenu);
   tap('btn-resume', () => G.resume());
@@ -745,6 +755,17 @@ function setupLobby() {
 let last = 0, fpsAcc = 0, fpsN = 0, fpsT = 0, hbT = 0;
 const menuCam = { t: 0 };
 
+function bombSpectate(dt) {
+  const ally = G.bomb.bots.find((b) => b.alive && b.team === G.bomb.playerTeam);
+  const c = G.camera;
+  if (!ally) return;
+  const back = new THREE.Vector3(-Math.sin(ally.yaw), 0, -Math.cos(ally.yaw)).multiplyScalar(2.6);
+  const eye = ally.eye;
+  c.position.lerp(eye.clone().add(back).add(new THREE.Vector3(0, 0.6, 0)), Math.min(1, dt * 5));
+  c.lookAt(eye.add(new THREE.Vector3(Math.sin(ally.yaw), 0, Math.cos(ally.yaw)).multiplyScalar(4)));
+  G.hud.setDown('아군 관전 중 · 다음 라운드에 재투입');
+}
+
 function spectateCam(dt) {
   const mate = [...G.net.mates.values()].find((m) => m.alive && m.avatar);
   const c = G.camera;
@@ -766,9 +787,11 @@ function frame(now) {
   if (G.state === 'playing' || G.state === 'gameover') {
     if (G.state === 'playing') {
       if (G.player.alive) { G.player.update(dt); G.weapons.update(dt); }
+      else if (G.bomb.active) bombSpectate(dt);
       else if (G.net.active && !G.match.pvp) spectateCam(dt);
       else { const c = G.camera; c.position.y = Math.max(G.player.pos.y + 0.3, c.position.y - dt * 1.4); }
-      if (G.authority && !G.match.pvp) G.waves.update(dt);
+      if (G.bomb.active) G.bomb.update(dt);
+      else if (G.authority && !G.match.pvp) G.waves.update(dt);
       G.match.update(dt);
       G.combat.update(dt);
     } else {

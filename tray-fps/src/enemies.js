@@ -104,9 +104,10 @@ export class Enemy {
     // 실사 병력 (Sketchfab CC-BY): 일반 적 = 전술복 병사 + 실사 AK, 중장갑 = FSB 대원
     const RA = this.G.assets && this.G.assets.real;
     if (this.skin === 'android' && RA && RA.tac_suit && RA.fsb) {
-      buildRealOperator(this, this.type === 'heavy' ? 'fsb' : 'tac_suit');
+      const v = this.variant || (this.type === 'heavy' ? 'fsb' : 'tac_suit');
+      buildRealOperator(this, v);
       this.visorMat.color.setRGB(2.2, 0.25, 0.15); // 적 식별 완장(붉은색)
-      if (this.type !== 'heavy') attachRifle(this);
+      if (v === 'tac_suit') attachRifle(this);
       return;
     }
     const g = geos(), M = mats(), s = this.T.scale, heavy = this.type === 'heavy', op = this.skin === 'operator';
@@ -241,7 +242,7 @@ export class Enemy {
       this.losT = 0.2;
       const wasSee = this.canSee;
       this.canSee = dist < 70 && W.lineOfSight(this.eye.clone(), target);
-      if (this.canSee) { this.lastSeen = target.clone(); if (!this.alerted || !wasSee) { if (!this.alerted) G.audio.alert(this.eye.clone()); this.alerted = true; this.seenT = 0; } }
+      if (this.canSee) { this.lastSeen = target.clone(); this.seenAtTime = G.time; if (!this.alerted || !wasSee) { if (!this.alerted) G.audio.alert(this.eye.clone()); this.alerted = true; this.seenT = 0; } }
     }
     if (this.canSee) { this.seenT += dt; this.lostT = 0; } else { this.seenT = 0; this.lostT += dt; }
 
@@ -263,7 +264,7 @@ export class Enemy {
       speed *= 0.55;
       this.path = null;
     } else {
-      const goal = this.alerted && this.lastSeen ? this.lastSeen : P.pos;
+      const goal = this.objectiveGoal ? this.objectiveGoal() : (this.alerted && this.lastSeen ? this.lastSeen : P.pos);
       this.pathT -= dt;
       if (this.pathT <= 0 || !this.path || !this.path.length) {
         this.pathT = 0.9 + Math.random() * 0.5;
@@ -355,7 +356,7 @@ export class Enemy {
     let end;
     if (hit) {
       end = vis[Math.floor(Math.random() * vis.length)].clone();
-      P.damage(T.dmg * (0.85 + Math.random() * 0.3), this.pos.clone());
+      P.damage(T.dmg * (0.85 + Math.random() * 0.3), this.pos.clone(), this.id);
     } else {
       const aim = vis.length ? vis[0] : pts[1];
       const miss = new THREE.Vector3((Math.random() - 0.5) * 2.2, (Math.random() - 0.3) * 1.2, (Math.random() - 0.5) * 2.2).multiplyScalar(vis.length ? 1 : 0.25);
@@ -658,6 +659,12 @@ export class Enemies {
   // 방장/싱글 전용: 점수, 피드, 드롭, 네트워크 알림
   onKill(e, head, by = 'local', dir = new THREE.Vector3()) {
     this.releaseToken(e);
+    if (this.G.bomb && this.G.bomb.active) { // 폭파 작전: 처치 피드·보상만
+      const killer = by === 'local' ? '나' : (this.byId.get(by) || {}).name || '폭발';
+      this.G.hud.feed(`${killer} ▸ ${e.name || e.T.name}${head ? ' · 헤드샷' : ''}`, by === 'local' ? 200 : 0);
+      if (by === 'local') this.G.bomb.onPlayerKill(e);
+      return;
+    }
     this.kills++; if (head) this.headshots++;
     const G = this.G;
     const pts = e.T.score + (head ? 50 : 0);
@@ -675,7 +682,7 @@ export class Enemies {
 
   raycast(origin, dir, maxT) {
     this.ray.set(origin, dir); this.ray.far = maxT;
-    const roots = this.list.filter((e) => e.alive).map((e) => e.root);
+    const B = this.G.bomb, roots = this.list.filter((e) => e.alive && !(B && B.active && e.team === B.playerTeam)).map((e) => e.root); // 아군 봇은 사격 판정 제외
     if (!roots.length) return null;
     for (const r of roots) r.updateMatrixWorld(true);
     const hits = this.ray.intersectObjects(roots, true);
