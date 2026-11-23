@@ -52,6 +52,24 @@ class DownloadRepository(
         return null
     }
 
+    /** 매칭된 허가 음원 등록 (자동 또는 사용자 승인) */
+    suspend fun enqueueMatched(rawUrl: String, name: String, rightsNote: String, videoId: String, auto: Boolean): String? {
+        val url = try { SafeHttp.validate(rawUrl) } catch (e: Exception) { return e.message }
+        if (dao.countLiveByVideo(videoId) > 0 || dao.countLiveByUrl(url.toString()) > 0) return "이미 대기열에 있거나 완료되었습니다."
+        val now = System.currentTimeMillis()
+        val job = DownloadJobEntity(
+            jobId = UUID.randomUUID().toString(), url = url.toString(),
+            displayName = name.replace(Regex("[\\\\/:*?\"<>|]"), "_"),
+            state = DownloadState.QUEUED.name, bytesDone = 0, totalBytes = -1,
+            etag = null, lastModified = null, attempts = 0, errorMessage = null,
+            contentUri = null, sha256 = null, rightsNote = rightsNote,
+            createdAt = now, updatedAt = now, isAuto = auto, videoId = videoId,
+        )
+        dao.insert(job)
+        schedule(job.jobId)
+        return null
+    }
+
     suspend fun schedule(jobId: String) {
         val wifiOnly = settings.current().wifiOnly
         val req = OneTimeWorkRequestBuilder<DownloadWorker>()
@@ -100,7 +118,7 @@ class DownloadRepository(
     suspend fun recoverInterrupted() {
         val stuck = dao.getByStates(
             listOf(
-                DownloadState.QUEUED.name, DownloadState.WAITING_NETWORK.name,
+                DownloadState.QUEUED.name, DownloadState.WAITING_NETWORK.name, DownloadState.WAITING_BATTERY.name,
                 DownloadState.DOWNLOADING.name, DownloadState.VERIFYING.name,
                 DownloadState.COMMITTING.name, DownloadState.FAILED_RETRYABLE.name,
             )

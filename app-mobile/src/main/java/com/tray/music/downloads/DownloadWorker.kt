@@ -5,6 +5,9 @@ import android.content.Context
 import android.content.pm.ServiceInfo
 import android.database.sqlite.SQLiteConstraintException
 import android.media.MediaExtractor
+import android.net.Uri
+import android.os.BatteryManager
+import androidx.documentfile.provider.DocumentFile
 import android.media.MediaFormat
 import android.os.Build
 import android.provider.MediaStore
@@ -51,6 +54,21 @@ class DownloadWorker(appContext: Context, params: WorkerParameters) : CoroutineW
         val job = dao.get(jobId) ?: return Result.failure()
         if (job.state in TERMINAL) return Result.success()
 
+        // 자동 신규 다운로드: 배터리 기준 미만 + 미충전이면 보류
+        if (job.isAuto) {
+            val policy = app.container.settings.current()
+            if (!policy.autoDownload) {
+                dao.setState(jobId, DownloadState.PAUSED.name, "자동 다운로드 동의가 꺼져 있어 보류")
+                return Result.success()
+            }
+            val bm = applicationContext.getSystemService(BatteryManager::class.java)
+            val level = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 100
+            if (level in 0 until policy.batteryMin && bm?.isCharging != true) {
+                dao.setState(jobId, DownloadState.WAITING_BATTERY.name, "배터리 ${level}% (기준 ${policy.batteryMin}%) — 충전 또는 회복 시 재개")
+                return Result.retry()
+            }
+        }
+
         return gate.withPermit {   // 동시 다운로드 최대 3개
             try {
                 runCatching { setForeground(foregroundInfo(job.displayName, 0, 0)) }
@@ -75,7 +93,8 @@ class DownloadWorker(appContext: Context, params: WorkerParameters) : CoroutineW
 
                 dao.setState(jobId, DownloadState.COMMITTING.name)
                 val fileName = safeFileName(job.displayName, mime)
-                val uri = commitToMediaStore(part, fileName, mime)
+                val tree = app.container.settings.current().treeUri
+                val uri = if (tree != null) commitToTree(part, fileName, mime, tree) else commitToMediaStore(part, fileName, mime)
                 try {
                     musicDao.insert(MusicFileEntity(
                         contentUri = uri, sha256 = sha, displayName = fileName, mimeType = mime,
@@ -283,6 +302,22 @@ class DownloadWorker(appContext: Context, params: WorkerParameters) : CoroutineW
             throw e
         }
         return uri.toString()
+    }
+
+    /** 사용자가 SAF로 선택한 폴더에 저장. 중간 실패 시 생성한 파일 삭제 */
+    private fun commitToTree(part: File, fileName: String, mime: String, tree: String): String {
+        val dir = DocumentFile.fromTreeUri(applicationContext, Uri.parse(tree))
+        if (dir == null || !dir.canWrite()) throw PermanentFailure("선택한 저장 폴더에 쓸 수 없습니다. 설정에서 폴더를 다시 선택하세요.")
+        val doc = dir.createFile(mime, fileName.substringBeforeLast('.'))
+            ?: throw RetryableFailure("저장 폴더에 파일을 만들 수 없습니다.")
+        try {
+            applicationContext.contentResolver.openOutputStream(doc.uri)?.use { out -> part.inputStream().use { it.copyTo(out) } }
+                ?: throw RetryableFailure("저장 스트림을 열 수 없습니다.")
+        } catch (e: Exception) {
+            doc.delete()
+            throw e
+        }
+        return doc.uri.toString()
     }
 
     // ---------------- 알림 ----------------

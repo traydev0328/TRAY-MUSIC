@@ -34,6 +34,8 @@ data class YoutubePlaylistItemEntity(
     /** AVAILABLE / UNAVAILABLE (삭제·비공개 전환 영상) */
     val status: String,
     val thumbnailUrl: String?,
+    /** videos.list contentDetails 로 받은 영상 길이(초). 0 = 모름 */
+    val durationSec: Int = 0,
 )
 
 /** 영구 다운로드 작업 — 앱/기기 재시작 후에도 복원 */
@@ -54,6 +56,10 @@ data class DownloadJobEntity(
     val rightsNote: String,         // 사용자가 확인한 이용 권한 근거
     val createdAt: Long,
     val updatedAt: Long,
+    /** true = 자동 매칭으로 생성된 작업 (배터리/동의 정책 적용) */
+    val isAuto: Boolean = false,
+    /** 자동 작업의 원본 YouTube 영상 ID */
+    val videoId: String? = null,
 )
 
 /** 앱이 저장·검증한 음악 파일 (원본은 MediaStore, DB에는 URI와 메타데이터만) */
@@ -74,9 +80,68 @@ data class MusicFileEntity(
 )
 
 enum class DownloadState {
-    QUEUED, WAITING_NETWORK, DOWNLOADING, VERIFYING, COMMITTING, COMPLETED,
+    QUEUED, WAITING_NETWORK, WAITING_BATTERY, DOWNLOADING, VERIFYING, COMMITTING, COMPLETED,
     PAUSED, FAILED_RETRYABLE, FAILED_PERMANENT, CANCELLED, DUPLICATE;
 
-    val isActive get() = this == QUEUED || this == WAITING_NETWORK || this == DOWNLOADING ||
+    val isActive get() = this == QUEUED || this == WAITING_NETWORK || this == WAITING_BATTERY || this == DOWNLOADING ||
         this == VERIFYING || this == COMMITTING || this == FAILED_RETRYABLE
 }
+
+/** YouTube 영상 ↔ 허가 카탈로그 음원 매칭 결과 */
+@Entity(tableName = "track_matches")
+data class TrackMatchEntity(
+    @PrimaryKey val videoId: String,
+    /** VERIFIED / NEEDS_REVIEW / DIFFERENT_VERSION / UNAVAILABLE / RIGHTS_BLOCKED */
+    val status: String,
+    val source: String,             // "jamendo"
+    val sourceTrackId: String?,
+    val title: String?,
+    val artist: String?,
+    val durationSec: Int,
+    val downloadUrl: String?,
+    val licenseUrl: String?,
+    val evidence: String,
+    val checkedAt: Long,
+)
+
+/** 즐겨찾기 (MediaStore 오디오 ID 기준) */
+@Entity(tableName = "favorites")
+data class FavoriteEntity(
+    @PrimaryKey val mediaId: Long,
+    val title: String,
+    val addedAt: Long,
+)
+
+/** 휴대폰 → 워치 전송 작업 (체크포인트 = 워치가 보고한 수신 바이트) */
+@Entity(tableName = "watch_transfers", indices = [Index("state"), Index("nodeId")])
+data class WatchTransferEntity(
+    @PrimaryKey val transferId: String,
+    val nodeId: String,
+    val mediaId: Long,
+    val sourceUri: String,
+    val title: String,
+    val artist: String,
+    /** 실제 전송 파일 (원본 URI 또는 변환된 캐시 파일 경로) */
+    val payloadPath: String?,
+    val payloadMime: String?,
+    val size: Long,
+    val sha256: String?,
+    val profile: String,
+    val state: String,              // PENDING/PREPARING/WAITING_WATCH/SENDING/VERIFYING/COMPLETED/FAILED/CANCELLED
+    val bytesAcked: Long,
+    val attempts: Int,
+    val error: String?,
+    val createdAt: Long,
+    val updatedAt: Long,
+)
+
+/** 변환 결과 캐시 재사용 */
+@Entity(tableName = "audio_conversions", primaryKeys = ["sourceKey", "profile"])
+data class AudioConversionEntity(
+    val sourceKey: String,          // MediaStore ID + 크기 + 수정시각
+    val profile: String,
+    val outputPath: String,
+    val outputSha256: String,
+    val outputSize: Long,
+    val createdAt: Long,
+)

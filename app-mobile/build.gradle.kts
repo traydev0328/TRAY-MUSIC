@@ -23,11 +23,13 @@ android {
         applicationId = "com.tray.music"
         minSdk = 29          // MediaStore RELATIVE_PATH / IS_PENDING 사용
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-p0"
+        versionCode = 2
+        versionName = "1.0.0"
 
         val apiKey = secrets.getProperty("YOUTUBE_API_KEY", "")
         buildConfigField("String", "YOUTUBE_API_KEY", "\"$apiKey\"")
+        val jamendo = secrets.getProperty("JAMENDO_CLIENT_ID", "")
+        buildConfigField("String", "JAMENDO_CLIENT_ID", "\"$jamendo\"")
     }
 
     signingConfigs {
@@ -92,6 +94,8 @@ dependencies {
     implementation(libs.play.services.auth)
     implementation(libs.coroutines.android)
     implementation(libs.coroutines.play.services)
+    implementation(libs.play.services.wearable)
+    implementation(libs.documentfile)
 
     testImplementation(libs.junit)
 }

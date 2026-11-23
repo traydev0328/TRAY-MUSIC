@@ -94,7 +94,27 @@ class YouTubeApi(private val context: Context) {
             }
             pageToken = json.optString("nextPageToken").ifEmpty { null }
         } while (pageToken != null)
-        return out
+        // 매칭용 영상 길이 (50개씩, 실패해도 목록 동기화는 유지)
+        val durations = runCatching { videoDurations(out.map { it.videoId }.filter { it.isNotEmpty() }.distinct(), token) }
+            .getOrDefault(emptyMap())
+        return out.map { it.copy(durationSec = durations[it.videoId] ?: 0) }
+    }
+
+    suspend fun videoDurations(ids: List<String>, token: String?): Map<String, Int> {
+        val map = HashMap<String, Int>()
+        ids.chunked(50).forEach { chunk ->
+            val url = base.newBuilder().addPathSegment("videos")
+                .addQueryParameter("part", "contentDetails")
+                .addQueryParameter("id", chunk.joinToString(","))
+                .addQueryParameter("maxResults", "50")
+                .build()
+            val items = get(url, token).optJSONArray("items")
+            for (i in 0 until (items?.length() ?: 0)) {
+                val o = items!!.getJSONObject(i)
+                map[o.getString("id")] = parseIsoDuration(o.optJSONObject("contentDetails")?.optString("duration").orEmpty())
+            }
+        }
+        return map
     }
 
     private fun parsePlaylist(o: JSONObject, owner: String): YoutubePlaylistEntity {
@@ -165,6 +185,14 @@ class YouTubeApi(private val context: Context) {
     }.getOrNull()
 
     companion object {
+        /** ISO-8601 (PT1H2M3S) → 초 */
+        fun parseIsoDuration(s: String): Int {
+            val m = Regex("P(?:(\\d+)D)?T?(?:(\\d+)H)?(?:(\\d+)M)?(?:(\\d+)S)?").matchEntire(s) ?: return 0
+            val (d, h, mi, se) = m.destructured
+            return (d.toIntOrNull() ?: 0) * 86400 + (h.toIntOrNull() ?: 0) * 3600 +
+                (mi.toIntOrNull() ?: 0) * 60 + (se.toIntOrNull() ?: 0)
+        }
+
         /** URL 또는 ID에서 재생목록 ID 추출 */
         fun parsePlaylistId(input: String): String? {
             val s = input.trim()

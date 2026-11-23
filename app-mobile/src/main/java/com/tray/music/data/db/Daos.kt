@@ -89,6 +89,9 @@ interface DownloadDao {
 
     @Query("SELECT COUNT(*) FROM download_jobs WHERE url = :url AND state NOT IN ('CANCELLED','FAILED_PERMANENT')")
     suspend fun countLiveByUrl(url: String): Int
+
+    @Query("SELECT COUNT(*) FROM download_jobs WHERE videoId = :videoId AND state NOT IN ('CANCELLED','FAILED_PERMANENT')")
+    suspend fun countLiveByVideo(videoId: String): Int
 }
 
 @Dao
@@ -104,4 +107,64 @@ interface MusicFileDao {
 
     @Query("DELETE FROM music_files WHERE contentUri = :uri")
     suspend fun deleteByUri(uri: String)
+}
+
+@Dao
+interface MatchDao {
+    @Query("SELECT * FROM track_matches")
+    fun observeAll(): Flow<List<TrackMatchEntity>>
+
+    @Query("SELECT * FROM track_matches WHERE videoId = :videoId")
+    suspend fun get(videoId: String): TrackMatchEntity?
+
+    @Upsert
+    suspend fun upsert(m: TrackMatchEntity)
+}
+
+@Dao
+interface FavoriteDao {
+    @Query("SELECT * FROM favorites ORDER BY addedAt DESC")
+    fun observeAll(): Flow<List<FavoriteEntity>>
+
+    @Query("SELECT * FROM favorites")
+    suspend fun all(): List<FavoriteEntity>
+
+    @Upsert
+    suspend fun add(f: FavoriteEntity)
+
+    @Query("DELETE FROM favorites WHERE mediaId = :id")
+    suspend fun remove(id: Long)
+}
+
+@Dao
+interface WatchDao {
+    @Query("SELECT * FROM watch_transfers ORDER BY createdAt DESC")
+    fun observeAll(): Flow<List<WatchTransferEntity>>
+
+    @Query("SELECT * FROM watch_transfers WHERE transferId = :id")
+    suspend fun get(id: String): WatchTransferEntity?
+
+    @Query("SELECT * FROM watch_transfers WHERE nodeId = :node AND mediaId = :mediaId AND profile = :profile AND state NOT IN ('FAILED','CANCELLED') LIMIT 1")
+    suspend fun findLive(node: String, mediaId: Long, profile: String): WatchTransferEntity?
+
+    @Query("SELECT * FROM watch_transfers WHERE state NOT IN ('COMPLETED','FAILED','CANCELLED')")
+    suspend fun unfinished(): List<WatchTransferEntity>
+
+    @Upsert
+    suspend fun upsert(t: WatchTransferEntity)
+
+    @Query("UPDATE watch_transfers SET state = :state, error = :error, updatedAt = :now WHERE transferId = :id")
+    suspend fun setState(id: String, state: String, error: String?, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE watch_transfers SET bytesAcked = :bytes, updatedAt = :now WHERE transferId = :id")
+    suspend fun setProgress(id: String, bytes: Long, now: Long = System.currentTimeMillis())
+
+    @Query("DELETE FROM watch_transfers WHERE transferId = :id")
+    suspend fun delete(id: String)
+
+    @Query("SELECT * FROM audio_conversions WHERE sourceKey = :key AND profile = :profile")
+    suspend fun conversion(key: String, profile: String): AudioConversionEntity?
+
+    @Upsert
+    suspend fun putConversion(c: AudioConversionEntity)
 }

@@ -18,7 +18,9 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -151,8 +153,32 @@ fun PlaylistDetailScreen(activity: MainActivity, container: AppContainer, id: St
     val scope = rememberCoroutineScope()
     val playlist by remember(id) { container.youtube.playlist(id) }.collectAsStateWithLifecycle(null)
     val items by remember(id) { container.youtube.items(id) }.collectAsStateWithLifecycle(emptyList())
+    val matches by container.matching.matches.collectAsStateWithLifecycle(emptyList())
+    val matchMap = remember(matches) { matches.associateBy { it.videoId } }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
+    var review by remember { mutableStateOf<com.tray.music.data.db.TrackMatchEntity?>(null) }
+
+    review?.let { m ->
+        AlertDialog(
+            onDismissRequest = { review = null },
+            title = { Text(if (m.status == "VERIFIED") "허가 음원 다운로드" else "동일 음원인지 확인") },
+            text = {
+                Column {
+                    Text("후보: ${m.artist} - ${m.title} (${formatDuration(m.durationSec * 1000L)})")
+                    Text("판정 근거: ${m.evidence}", style = MaterialTheme.typography.bodySmall)
+                    m.licenseUrl?.let { Text("라이선스: $it", style = MaterialTheme.typography.bodySmall) }
+                    Text("출처: Jamendo (다운로드 허용 값 확인됨)", style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch { message = container.matching.approve(m.videoId) ?: "다운로드 대기열에 추가했습니다."; review = null }
+                }) { Text("확인하고 다운로드") }
+            },
+            dismissButton = { TextButton(onClick = { review = null }) { Text("취소") } },
+        )
+    }
 
     fun open(uri: String) = activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)))
 
@@ -182,8 +208,19 @@ fun PlaylistDetailScreen(activity: MainActivity, container: AppContainer, id: St
                 }
                 if (busy) Text("동기화 중…", style = MaterialTheme.typography.bodySmall)
                 message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                Text("허가된 음원 자동 매칭(Jamendo 등)은 P1 단계 기능으로 아직 구현되지 않았습니다.",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (container.matching.isConfigured) {
+                    OutlinedButton(enabled = !busy, onClick = {
+                        scope.launch {
+                            busy = true; message = "허가 음원 카탈로그(Jamendo)에서 검색 중…"
+                            val n = runCatching { container.matching.matchItems(items, force = true) }
+                            message = n.fold({ "매칭 완료: ${it}곡 판정" }, { "매칭 실패: ${it.message}" })
+                            busy = false
+                        }
+                    }) { Text("허가 음원 찾기") }
+                } else {
+                    Text("허가 음원 매칭을 쓰려면 JAMENDO_CLIENT_ID 를 설정하고 다시 빌드하세요 (docs/SETUP_GOOGLE_CLOUD.md).",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
         items(items, key = { it.playlistItemId }) { it2 ->
@@ -201,7 +238,19 @@ fun PlaylistDetailScreen(activity: MainActivity, container: AppContainer, id: St
                     Text(it2.channelTitle, maxLines = 1, style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                if (it2.status == "AVAILABLE") StatusChip("유튜브 온라인 재생", Ok) else StatusChip("현재 접근 불가", Bad)
+                Column(horizontalAlignment = Alignment.End) {
+                    if (it2.status == "AVAILABLE") StatusChip("유튜브 온라인 재생", Ok) else StatusChip("현재 접근 불가", Bad)
+                    when (matchMap[it2.videoId]?.status) {
+                        "VERIFIED" -> Text("허가된 파일 발견", color = Ok, style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.clickable { review = matchMap[it2.videoId] })
+                        "NEEDS_REVIEW" -> Text("확인 필요", color = Warn, style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.clickable { review = matchMap[it2.videoId] })
+                        "DIFFERENT_VERSION" -> Text("다른 버전만 있음", color = Warn, style = MaterialTheme.typography.labelSmall)
+                        "RIGHTS_BLOCKED" -> Text("다운로드 비허용", color = Bad, style = MaterialTheme.typography.labelSmall)
+                        "UNAVAILABLE" -> Text("허가 파일 없음", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                        else -> {}
+                    }
+                }
             }
         }
     }

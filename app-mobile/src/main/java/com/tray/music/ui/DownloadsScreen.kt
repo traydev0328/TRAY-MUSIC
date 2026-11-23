@@ -43,7 +43,7 @@ import kotlinx.coroutines.launch
 
 private enum class Filter(val label: String, val states: Set<DownloadState>?) {
     ALL("전체", null),
-    ACTIVE("진행", setOf(DownloadState.QUEUED, DownloadState.WAITING_NETWORK, DownloadState.DOWNLOADING,
+    ACTIVE("진행", setOf(DownloadState.QUEUED, DownloadState.WAITING_NETWORK, DownloadState.WAITING_BATTERY, DownloadState.DOWNLOADING,
         DownloadState.VERIFYING, DownloadState.COMMITTING, DownloadState.FAILED_RETRYABLE)),
     DONE("완료", setOf(DownloadState.COMPLETED, DownloadState.DUPLICATE)),
     FAILED("실패", setOf(DownloadState.FAILED_PERMANENT)),
@@ -143,6 +143,7 @@ private fun JobCard(
     val (label, color) = when (st) {
         DownloadState.QUEUED -> "대기" to Warn
         DownloadState.WAITING_NETWORK -> "네트워크 대기" to Warn
+        DownloadState.WAITING_BATTERY -> "배터리 대기" to Warn
         DownloadState.DOWNLOADING -> "다운로드 중" to MaterialTheme.colorScheme.primary
         DownloadState.VERIFYING -> "검증 중" to MaterialTheme.colorScheme.primary
         DownloadState.COMMITTING -> "저장 중" to MaterialTheme.colorScheme.primary
@@ -179,6 +180,7 @@ private fun JobCard(
                 Text(parts.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
             }
             j.errorMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = if (st == DownloadState.DUPLICATE) Ok else Bad) }
+            if (j.isAuto) Text("자동 매칭 다운로드", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             Text("권한 근거: ${j.rightsNote}", style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row {

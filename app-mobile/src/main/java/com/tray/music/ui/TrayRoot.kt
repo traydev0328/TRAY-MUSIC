@@ -135,8 +135,9 @@ fun TrayRoot(activity: MainActivity) {
             }
             composable("downloads") { DownloadsScreen(container, onCompleted = rescan) }
             composable("library") { LibraryScreen(container, library, rescan, onOpenPlayer = { nav.navigate("player") }) }
-            composable("settings") { SettingsScreen(activity, container, library, rescan) }
-            composable("player") { PlayerScreen(container.player, onBack = { nav.popBackStack() }) }
+            composable("settings") { SettingsScreen(activity, container, library, rescan, onOpenWatch = { nav.navigate("watch") }) }
+            composable("watch") { WatchScreen(container, onBack = { nav.popBackStack() }) }
+            composable("player") { PlayerScreen(container, onBack = { nav.popBackStack() }) }
         }
     }
 }

@@ -11,6 +11,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 다른 앱이 저장한 음악 탐색용. 이 앱이 만든 파일은 권한 없이도 접근 가능 -->
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- 오디오 시각화(Visualizer) 전용. 마이크 녹음은 하지 않음. 거부 시 시각화만 비활성 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
@@ -46,6 +48,18 @@
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".watchlink.TrayWearListenerService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data
+                    android:host="*"
+                    android:pathPrefix="/tray"
+                    android:scheme="wear" />
             </intent-filter>
         </service>
 

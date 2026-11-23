@@ -87,6 +87,10 @@ class PlayerConnection(private val context: Context) {
     fun previous() { controller?.seekToPrevious() }
     fun seekTo(ms: Long) { controller?.seekTo(ms) }
     fun position(): Long = controller?.currentPosition ?: 0L
+    fun setPlaybackParameters(speed: Float, pitch: Float) {
+        controller?.playbackParameters = androidx.media3.common.PlaybackParameters(speed, pitch)
+    }
+
     fun toggleShuffle() { controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } }
     fun cycleRepeat() {
         controller?.let {
