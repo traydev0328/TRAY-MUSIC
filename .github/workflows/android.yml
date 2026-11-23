@@ -29,18 +29,21 @@ jobs:
 
       # 저장소 Secrets (Settings > Secrets and variables > Actions)
       #   YOUTUBE_API_KEY            : (선택) 공개 재생목록 조회용 API 키
+      #   JAMENDO_CLIENT_ID          : (선택) 허가 음원 매칭용 Jamendo client_id
       #   TRAY_KEYSTORE_BASE64       : (권장) 개인 서명 키 .jks 를 base64 인코딩한 값
       #   TRAY_KEYSTORE_PASSWORD / TRAY_KEY_ALIAS / TRAY_KEY_PASSWORD
       # 서명 키가 없으면 매 빌드마다 SHA-1 이 바뀌는 임시 디버그 키로 서명되므로 Google 로그인이 동작하지 않는다.
       - name: Prepare secrets
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          JAMENDO_CLIENT_ID: ${{ secrets.JAMENDO_CLIENT_ID }}
           KS_B64: ${{ secrets.TRAY_KEYSTORE_BASE64 }}
           KS_PASS: ${{ secrets.TRAY_KEYSTORE_PASSWORD }}
           KS_ALIAS: ${{ secrets.TRAY_KEY_ALIAS }}
           KEY_PASS: ${{ secrets.TRAY_KEY_PASSWORD }}
         run: |
           echo "YOUTUBE_API_KEY=${YOUTUBE_API_KEY}" > secrets.properties
+          echo "JAMENDO_CLIENT_ID=${JAMENDO_CLIENT_ID}" >> secrets.properties
           if [ -n "$KS_B64" ]; then
             echo "$KS_B64" | base64 -d > tray-release.jks
             {

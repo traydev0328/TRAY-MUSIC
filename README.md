@@ -6,18 +6,19 @@ Galaxy S23 Ultra / Galaxy Watch5 Pro 개인 전용 음악 관리 앱. 기준 문
 
 | 단계 | 상태 |
 |---|---|
-| P0 휴대폰 기본 앱 | **코드 작성 완료 · CI 빌드 확인 필요 · 실기기 미검증** |
-| P1 자동화(매칭/자동 동기화/EQ/가사 등) | 미구현 |
-| P2 Wear OS | 미구현 |
-| P3 통합 안정화 | 미구현 |
+| P0 휴대폰 기본 앱 | 구현 · CI 빌드 통과 · 실기기 미검증 |
+| P1 자동 동기화/허가 음원 매칭/EQ·가사·시각화 | 구현(크로스페이드·Commons/Archive 제외) · CI 통과 · 실기기 미검증 |
+| P2 Wear OS 앱/전송/AAC 변환/리모컨 | 구현 · CI 통과 · 실기기 미검증 |
+| P3 실기기 장애 테스트·안정화 | **실기기 필요 — 미완료** (`docs/TEST_PLAN.md`) |
 
 기능별 상세 상태는 [`docs/STATUS.md`](docs/STATUS.md).
 
 ## APK 받는 법 (GitHub Actions)
 
 1. 저장소 **Actions** 탭 → `Build TRAY MUSIC APK` → 최신 실행(초록 체크) 클릭
-2. 하단 **Artifacts** 의 `TRAY_MUSIC_MOBILE` 다운로드 → 압축 해제 → `TRAY_MUSIC_MOBILE.apk`
-3. 휴대폰으로 옮겨 설치 (설정에서 '출처를 알 수 없는 앱 설치' 허용 필요)
+2. 하단 **Artifacts** 의 `TRAY_MUSIC_APKS` 다운로드 → 압축 해제
+   - `TRAY_MUSIC_MOBILE.apk` → 휴대폰에 설치 ('출처를 알 수 없는 앱 설치' 허용)
+   - `TRAY_MUSIC_WEAR.apk` → 워치에 adb 로 설치 (`docs/SETUP_GOOGLE_CLOUD.md` ⑤)
 
 Google 로그인을 쓰려면 **서명 키 Secrets 등록 + Google Cloud 설정**이 필요합니다 → [`docs/SETUP_GOOGLE_CLOUD.md`](docs/SETUP_GOOGLE_CLOUD.md)
 

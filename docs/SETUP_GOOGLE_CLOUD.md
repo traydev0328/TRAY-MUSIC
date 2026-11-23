@@ -27,6 +27,7 @@ keytool -list -v -keystore tray-release.jks -alias tray   # SHA1 확인
 | `TRAY_KEY_ALIAS` | `tray` |
 | `TRAY_KEY_PASSWORD` | 키 정보 파일의 비밀번호 |
 | `YOUTUBE_API_KEY` | (선택) ③-3 에서 만든 API 키 |
+| `JAMENDO_CLIENT_ID` | (선택) ④ 에서 발급한 client_id |
 
 등록 후 Actions 탭에서 `Run workflow` 로 다시 빌드하면 개인 키로 서명된 release APK가 나옵니다.
 Artifact 안 `SIGNING_CERT.txt` 의 SHA-1 이 키 정보 파일과 같은지 확인하세요.
@@ -52,3 +53,21 @@ Artifact 안 `SIGNING_CERT.txt` 의 SHA-1 이 키 정보 파일과 같은지 확
 - 테스트 모드 OAuth는 일정 기간 후 재승인을 요구할 수 있습니다. 앱이 재승인 화면을 다시 띄웁니다.
 - `DEVELOPER_ERROR` 가 나오면 패키지명/SHA-1 불일치입니다.
 - API 사용은 일일 할당량(기본 10,000 units) 안에서 무료이며 별도 결제가 필요하지 않습니다.
+
+## ④ Jamendo (허가 음원 매칭, 선택)
+
+1. https://devportal.jamendo.com 에서 가입 → 앱 등록 → **Client ID** 발급 (무료, 이용 약관 확인)
+2. GitHub Secrets `JAMENDO_CLIENT_ID` 에 등록 → Actions 재빌드
+3. Jamendo 는 독립 아티스트 CC 라이선스 음원 위주라 **일반 K-POP·팝송은 대부분 '허가 파일 없음'으로 나옵니다.** 정상 동작입니다.
+
+## ⑤ 워치 APK 설치 (Galaxy Watch5 Pro)
+
+1. 워치: 설정 → 디바이스 정보 → 소프트웨어 → 소프트웨어 버전 5번 탭 → 개발자 옵션 → **ADB 디버깅 / 무선 디버깅** 켜기
+2. PC와 워치를 같은 Wi-Fi 에 연결, 워치의 무선 디버깅 화면에서 IP:포트·페어링 코드 확인
+3. PC PowerShell (Android SDK platform-tools 필요):
+```powershell
+adb pair <IP>:<페어링포트>     # 페어링 코드 입력
+adb connect <IP>:<포트>
+adb -s <IP>:<포트> install TRAY_MUSIC_WEAR.apk
+```
+4. 휴대폰 APK와 워치 APK는 **같은 Actions 실행(또는 같은 서명 키)** 에서 나온 것을 설치해야 서로 통신합니다.
