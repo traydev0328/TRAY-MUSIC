@@ -1,9 +1,47 @@
 // 실사 에셋 로더 — Poly Haven CC0 스캔 텍스처/모델/HDRI. 실패하면 null 을 돌려주고 절차적 대체물을 쓴다.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
 const BASE = new URL('../assets/', import.meta.url).href;
+
+// ── 보안 정책(CSP)이 엄격한 페이지에서도 동작하는 glTF 로더 ──
+// claude.ai 미리보기 같은 페이지는 WebAssembly·data: URL fetch·blob: URL 이 막힐 수 있다.
+// 그래서 JSON 을 직접 받아 base64 버퍼를 자바스크립트로 풀고, 메모리 안에서 GLB 로 조립해 파싱한다.
+// 이미지는 fetch 대신 <img> 로 읽는다(다른 텍스처와 같은 경로).
+function b64ToBytes(b64) {
+  if (Uint8Array.fromBase64) return Uint8Array.fromBase64(b64);
+  const bin = atob(b64), n = bin.length, out = new Uint8Array(n);
+  for (let i = 0; i < n; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function toGLB(json) {
+  const buf = json.buffers && json.buffers[0];
+  let bin = null;
+  if (buf && buf.uri && buf.uri.startsWith('data:')) {
+    bin = b64ToBytes(buf.uri.slice(buf.uri.indexOf(',') + 1));
+    delete buf.uri;
+    buf.byteLength = bin.length;
+  }
+  const enc = new TextEncoder().encode(JSON.stringify(json));
+  const jLen = (enc.length + 3) & ~3, bLen = bin ? (bin.length + 3) & ~3 : 0;
+  const total = 12 + 8 + jLen + (bin ? 8 + bLen : 0);
+  const out = new ArrayBuffer(total), dv = new DataView(out), u8 = new Uint8Array(out);
+  dv.setUint32(0, 0x46546C67, true); dv.setUint32(4, 2, true); dv.setUint32(8, total, true);
+  dv.setUint32(12, jLen, true); dv.setUint32(16, 0x4E4F534A, true);
+  u8.set(enc, 20); for (let i = 20 + enc.length; i < 20 + jLen; i++) u8[i] = 0x20;
+  if (bin) { const o = 20 + jLen; dv.setUint32(o, bLen, true); dv.setUint32(o + 4, 0x004E4942, true); u8.set(bin, o + 8); }
+  return out;
+}
+const safeLoader = new GLTFLoader();
+// GLTFLoader 는 크롬에서 이미지를 fetch+createImageBitmap 으로 읽는데, 이를 일반 이미지 로더로 바꾼다
+safeLoader.register((parser) => { parser.textureLoader = new THREE.TextureLoader(parser.options.manager); return { name: 'tray_img_loader' }; });
+export async function loadGLTF(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url} HTTP ${res.status}`);
+  const glb = toGLB(await res.json());
+  const dir = url.slice(0, url.lastIndexOf('/') + 1);
+  return new Promise((resolve, reject) => safeLoader.parse(glb, dir, resolve, reject));
+}
 
 export const MODEL_LIST = [
   'concrete_road_barrier', 'Barrel_01', 'barrel_03', 'propane_tank', 'street_lamp_01',
@@ -30,7 +68,6 @@ export class Assets {
 
   async loadAll(onProgress) {
     const jobs = [];
-    const gltf = new GLTFLoader();
     const tl = new THREE.TextureLoader();
     const il = new THREE.ImageLoader();
     let done = 0;
@@ -38,7 +75,7 @@ export class Assets {
     const tickP = (label) => { done++; onProgress(done / total, label); };
 
     for (const id of MODEL_LIST) {
-      jobs.push(gltf.loadAsync(`${BASE}m/${id}/${id}.json`).then((g) => { this.models[id] = this._prepModel(g.scene); tickP(`모델 ${id}`); })
+      jobs.push(loadGLTF(`${BASE}m/${id}/${id}.json`).then((g) => { this.models[id] = this._prepModel(g.scene); tickP(`모델 ${id}`); })
         .catch((e) => { this.failed.push(id); console.warn('asset fail', id, e); tickP(); }));
     }
     for (const [set, maps] of Object.entries(TEX_LIST)) {
@@ -100,11 +137,10 @@ export class Assets {
     this._dayLoaded = true;
   }
 
-  // 실사 캐릭터·총기 (Sketchfab CC-BY, meshopt 무손실 압축 + WebP). 원본 씬과 애니메이션을 그대로 보관
+  // 실사 캐릭터·총기 (Sketchfab CC-BY, 원본 지오메트리 그대로 + WebP 텍스처). 원본 씬과 애니메이션을 그대로 보관
   async loadReal(ids = ['swat', 'fsb', 'm16', 'tac_suit', 'ar_ak47t']) {
     this.real = this.real || {};
-    const gl = new GLTFLoader(); gl.setMeshoptDecoder(MeshoptDecoder);
-    await Promise.all(ids.filter((id) => !this.real[id]).map((id) => gl.loadAsync(`${BASE}real/${id}/${id}.json`).then((g) => {
+    await Promise.all(ids.filter((id) => !this.real[id]).map((id) => loadGLTF(`${BASE}real/${id}/${id}.json`).then((g) => {
       g.scene.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = !o.isSkinnedMesh; [].concat(o.material).forEach((m) => { if (m.map) m.map.anisotropy = Math.min(8, this.maxAniso); }); } });
       this.real[id] = { scene: g.scene, animations: g.animations };
     }).catch((e) => { this.failed.push(`real/${id}`); console.warn('real asset fail', id, e); })));

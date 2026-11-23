@@ -35,7 +35,7 @@
 | M16 Assault Rifle | jeandiz | https://sketchfab.com/3d-models/339d0f7b21024387853dd926a5d51b50 | 1인칭 소총 |
 
 라이선스: https://creativecommons.org/licenses/by/4.0/
-변경 사항: 형상은 meshopt 무손실 압축(폴리곤·좌표 원본 유지), 텍스처는 해상도 유지한 WebP(품질 92~95) 변환, 게임용 판정 박스·팀 완장 추가.
+변경 사항: 형상은 원본 그대로(폴리곤·좌표 무손실, 중복 데이터만 제거), 텍스처는 해상도 유지한 WebP(품질 92~95) 변환, 게임용 판정 박스·팀 완장 추가.
 
 ## 실사 총기 12종 (Sketchfab, CC BY 4.0)
 
@@ -54,7 +54,7 @@
 | L115A3 | Oxenci | https://sketchfab.com/3d-models/b3a829d236004a769c0b3ac07cc3a9ad | L-115 장거리 저격총 |
 | M40A3 Sniper Rifle | 3danalyst | https://sketchfab.com/3d-models/861c37a0373e4362b964ff526fc620c4 | M-40 볼트액션 저격총 |
 
-변경 사항: meshopt 무손실 압축, 텍스처 WebP(해상도 유지), 1인칭 자동 정렬(축·축척·손 위치·조준선). 게임 내 명칭은 실총 상표 대신 별도 표기.
+변경 사항: 형상 원본 유지(중복 데이터만 제거), 텍스처 WebP(해상도 유지), 1인칭 자동 정렬(축·축척·손 위치·조준선). 게임 내 명칭은 실총 상표 대신 별도 표기.
 
 ## 적군 병력 (Sketchfab, CC BY 4.0)
 
