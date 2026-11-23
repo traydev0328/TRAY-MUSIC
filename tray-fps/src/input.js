@@ -121,6 +121,7 @@ export class Input {
       this.keys.add(k);
       if (k === 'Space') { this.edges.add('jump'); e.preventDefault(); }
       if (k === 'KeyR') this.edges.add('reload');
+      if (k === 'KeyG') this.edges.add('grenade');
       if (k === 'KeyQ' || k === 'Digit1' || k === 'Digit2') this.edges.add(k === 'Digit1' ? 'slot1' : k === 'Digit2' ? 'slot2' : 'swap');
       if (k === 'KeyC' || k === 'ControlLeft') this.crouch = !this.crouch;
       this._keysToMove();
@@ -185,6 +186,7 @@ export class Input {
       case 'jump': if (down) this.edges.add('jump'); break;
       case 'reload': if (down) this.edges.add('reload'); break;
       case 'swap': if (down) this.edges.add('swap'); break;
+      case 'grenade': if (down) this.edges.add('grenade'); break;
       case 'pause': if (down) this.G.pause(); break;
     }
   }

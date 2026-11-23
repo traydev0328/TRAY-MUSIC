@@ -41,7 +41,7 @@ export class Weapons {
     this.adsT = 0; this.sprintT = 0;
     this.cool = 0; this.reloadT = -1; this.swapT = -1; this.swapTo = null;
     this.kickZ = 0; this.kickR = 0; this.swayX = 0; this.swayY = 0; this.bloom = 0;
-    this.flashT = 0; this.shotCount = 0; this.pumpT = -1;
+    this.flashT = 0; this.shotCount = 0; this.pumpT = -1; this.throwT = -1;
     this.stats = { shots: 0, hits: 0 };
     this._show('rifle');
   }
@@ -234,7 +234,7 @@ export class Weapons {
     const spread = this.currentSpread();
     const m = this.models[this.cur];
     const muzzleW = m.muzzle.getWorldPosition(new THREE.Vector3());
-    let hitAny = false, killAny = false, headAny = false;
+    let hitAny = false, killAny = false, headAny = false, firstEnd = null, shotInfo = null;
     for (let p = 0; p < d.pellets; p++) {
       const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * spread;
       const dir = fwd.clone().addScaledVector(right, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r).normalize();
@@ -246,17 +246,23 @@ export class Weapons {
         end = eh.point;
         const fo = d.falloff, k = Math.min(1, Math.max(0, (eh.dist - fo[0]) / (fo[1] - fo[0])));
         const mul = (eh.part === 'head' ? d.headMul : eh.part === 'core' ? 1.8 : 1) * (1 - k * (1 - fo[2]));
-        const res = eh.enemy.takeDamage(d.dmg * mul, eh.part, dir, eh.point);
+        let res = { killed: false };
+        if (G.net.isClient) G.net.sendHost({ t: 'hit', id: eh.enemy.id, d: Math.round(d.dmg * mul * 10) / 10, p: eh.part, dir: G.net.v3(dir) });
+        else res = eh.enemy.takeDamage(d.dmg * mul, eh.part, dir, eh.point, G.net.active ? G.net.myId : 'local');
         hitAny = true; if (res.killed) killAny = true; if (eh.part === 'head' || eh.part === 'core') headAny = true;
         G.effects.robotHit(eh.point, dir, eh.part === 'head');
       } else if (lvl) {
         end = origin.clone().addScaledVector(dir, lvl.t);
         G.effects.impact(end, lvl.normal, lvl.surface);
+        if (lvl.ref && lvl.ref.explosive) G.combat.damageProp(lvl.ref, d.dmg, G.net.active ? G.net.myId : 'local');
+        if (p === 0) shotInfo = { n: lvl.normal, s: lvl.surface };
       } else end = origin.clone().addScaledVector(dir, 120);
       if (p === 0 && (this.shotCount % d.tracerEvery === 0)) G.effects.tracer(muzzleW, end, false);
+      if (p === 0) firstEnd = end;
     }
     if (hitAny) { this.stats.hits++; G.hud.hitmarker(killAny, headAny); G.audio.hitmarker(killAny, headAny); }
     G.enemies.alertNoise(origin, 45);
+    if (G.net.active && firstEnd) G.net.sendAll({ t: 'shot', e: G.net.v3(firstEnd), w: this.cur === 'shotgun' ? 1 : 0, ...(shotInfo ? { n: G.net.v3(shotInfo.n), s: shotInfo.s } : {}) });
 
     // 반동/효과
     const ads = this.adsT;
@@ -285,6 +291,10 @@ export class Weapons {
     if (I.take('swap')) this.swap();
     if (I.take('slot1')) this.swap('rifle');
     if (I.take('slot2')) this.swap('shotgun');
+    if (I.take('grenade') && this.throwT < 0 && this.swapT < 0 && G.player.alive) {
+      if (G.combat.playerThrow()) { this.throwT = 0; this.reloadT = -1; }
+    }
+    if (this.throwT >= 0) { this.throwT += dt; if (this.throwT > 0.55) this.throwT = -1; }
 
     // 교체
     if (this.swapT >= 0) {
@@ -300,7 +310,7 @@ export class Weapons {
         s.mag += take; s.reserve -= take; this.reloadT = -1;
       }
     }
-    const busy = this.reloadT >= 0 || this.swapT >= 0;
+    const busy = this.reloadT >= 0 || this.swapT >= 0 || this.throwT >= 0;
     const sprint = P.sprinting;
     const wantAds = I.ads && !sprint && this.swapT < 0 && this.reloadT < 0;
     this.adsT += ((wantAds ? 1 : 0) - this.adsT) * Math.min(1, dt * 14);
@@ -364,6 +374,8 @@ export class Weapons {
         if (k >= 1) { this.pumpT = -1; this._ejected = false; m.pump.position.z = m.pumpHome; }
       }
     }
+    // 투척 애니메이션 (총을 내렸다 올림)
+    if (this.throwT >= 0) { const e = Math.sin(Math.min(1, this.throwT / 0.55) * Math.PI); pos.y -= 0.22 * e; pos.x += 0.05 * e; rx -= 0.5 * e; rz -= 0.3 * e; }
     // 교체 애니메이션
     if (this.swapT >= 0) { const e = Math.sin(Math.min(1, this.swapT / 0.56) * Math.PI); pos.y -= 0.25 * e; rx -= 0.6 * e; }
     m.root.position.copy(pos);

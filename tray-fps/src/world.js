@@ -11,10 +11,13 @@ const GN = (HALF * 2) / GRID;
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 export class World {
-  constructor(G) {
+  constructor(G, assets) {
     this.G = G;
+    this.A = assets;            // 실사 에셋 (없으면 절차적 대체)
     this.scene = G.scene;
     this.colliders = [];
+    this.placements = {};       // 인스턴싱할 모델 배치
+    this.explosives = [];
     this.buckets = new Map();   // 재질별 정적 지오메트리 (병합용)
     this.timeU = { value: 0 };
     this.flash = 0;
@@ -30,18 +33,21 @@ export class World {
   // ---------------- 빌드 ----------------
   async build(progress) {
     const step = async (p, label) => { progress(p, label); await tick(); };
-    await step(0.05, '콘크리트 표면 생성');
+    const A = this.A;
+    await step(0.05, '콘크리트 표면 준비');
     this.tex = {};
-    this.tex.wall = TX.concrete(11, { seams: 2 });
+    // 실사 텍스처가 없는 항목만 절차적으로 생성
+    if (!A.set('concrete_wall_006') || !A.set('concrete_slab_wall')) this.tex.wall = TX.concrete(11, { seams: 2 });
     this.tex.barrier = TX.concrete(23, { base: 0.5 });
-    await step(0.15, '젖은 아스팔트 생성');
-    this.tex.asphalt = TX.asphalt(5);
+    await step(0.15, '젖은 아스팔트 준비');
+    if (!A.set('asphalt_02')) this.tex.asphalt = TX.asphalt(5);
     this.tex.puddle = TX.puddleMask(77);
-    await step(0.28, '컨테이너 강판 생성');
-    const contColors = [[0.32, 0.045, 0.03], [0.03, 0.09, 0.2], [0.05, 0.13, 0.07], [0.5, 0.2, 0.025], [0.3, 0.3, 0.28]];
-    this.tex.cont = TX.corrugated(31, contColors, { ridges: 10, label: true, rustAmt: 0.55 });
-    await step(0.4, '창고 외벽 생성');
-    this.tex.clad = TX.corrugated(41, [[0.16, 0.19, 0.22]], { ridges: 14, rustAmt: 0.35 });
+    await step(0.28, '컨테이너 강판 준비');
+    this.contColors = [[0.42, 0.07, 0.045], [0.05, 0.13, 0.28], [0.16, 0.32, 0.14], [0.62, 0.27, 0.04], [0.36, 0.36, 0.34]];
+    this.contMaps = A.containerVariants(this.contColors);
+    if (!this.contMaps) this.tex.cont = TX.corrugated(31, this.contColors.map((c) => c.map((v) => v * 0.7)), { ridges: 10, label: true, rustAmt: 0.55 });
+    await step(0.4, '창고 외벽 준비');
+    if (!A.set('corrugated_iron_02')) this.tex.clad = TX.corrugated(41, [[0.16, 0.19, 0.22]], { ridges: 14, rustAmt: 0.35 });
     await step(0.48, '목재 상자 생성');
     this.tex.crate = TX.crateWood(51);
     this.tex.micro = TX.microDetail(61);
@@ -58,6 +64,7 @@ export class World {
     this._layout();
     await step(0.8, '정적 메시 병합');
     this._mergeStatic();
+    this._finalizeProps();
     this._background();
     this._rain();
     await step(0.86, '길찾기 격자 계산');
@@ -83,15 +90,42 @@ export class World {
     return m;
   }
 
+  // 실사 텍스처 세트 → 재질 (ARM: R=AO, G=거칠기, B=금속)
+  _pbr(setName, fallback, ud, extra = {}) {
+    const s = this.A.set(setName);
+    let m;
+    if (s) {
+      m = new THREE.MeshStandardMaterial({
+        map: s.map, normalMap: s.normalMap,
+        roughnessMap: s.ormMap || s.roughMap, metalnessMap: s.ormMap || null, aoMap: s.ormMap || null, aoMapIntensity: 0.9,
+        roughness: 1, metalness: s.ormMap ? 1 : 0, envMapIntensity: 0.8, ...extra,
+      });
+      ud = { ...ud, tw: ud.twAsset || ud.tw };
+    } else m = this._std(fallback);
+    m.userData = ud;
+    return m;
+  }
+
   _materials() {
     const T = this.tex, M = this.mat = {};
-    M.wall = this._std(T.wall); M.wall.userData = { surface: 'concrete', tw: 4 };
+    M.wall = this._pbr('concrete_wall_006', T.wall, { surface: 'concrete', tw: 4, twAsset: 3 });
+    M.office = this._pbr('concrete_slab_wall', T.wall, { surface: 'concrete', tw: 4, twAsset: 3.5 });
     M.barrier = this._std(T.barrier); M.barrier.userData = { surface: 'concrete', tw: 2 };
-    M.cont = T.cont.maps.map((map) => {
-      const m = this._std({ map, normalMap: T.cont.normalMap, ormMap: T.cont.ormMap });
-      m.userData = { surface: 'metal', tw: 2.7 }; return m;
-    });
-    M.clad = this._std({ map: T.clad.maps[0], normalMap: T.clad.normalMap, ormMap: T.clad.ormMap }); M.clad.userData = { surface: 'metal', tw: 3 };
+    const cs = this.A.set('container_side');
+    if (this.contMaps && cs) {
+      M.cont = this.contMaps.map((map) => {
+        const m = new THREE.MeshStandardMaterial({ map, normalMap: cs.normalMap, roughnessMap: cs.ormMap, metalnessMap: cs.ormMap, aoMap: cs.ormMap, roughness: 1, metalness: 1, envMapIntensity: 0.8 });
+        m.userData = { surface: 'metal', tw: 2.6 }; return m;
+      });
+    } else {
+      M.cont = T.cont.maps.map((map) => {
+        const m = this._std({ map, normalMap: T.cont.normalMap, ormMap: T.cont.ormMap });
+        m.userData = { surface: 'metal', tw: 2.7 }; return m;
+      });
+    }
+    M.clad = this.A.set('corrugated_iron_02')
+      ? this._pbr('corrugated_iron_02', null, { surface: 'metal', tw: 2.2 }, { color: 0x9aa4ad })
+      : (() => { const m = this._std({ map: T.clad.maps[0], normalMap: T.clad.normalMap, ormMap: T.clad.ormMap }); m.userData = { surface: 'metal', tw: 3 }; return m; })();
     M.crate = this._std(T.crate); M.crate.userData = { surface: 'wood', tw: 1.2 };
     M.steel = new THREE.MeshStandardMaterial({ color: 0x2a2d31, roughness: 0.45, metalness: 0.85, normalMap: T.micro });
     M.steel.userData = { surface: 'metal', tw: 1 };
@@ -223,7 +257,10 @@ export class World {
   }
 
   _environment() {
-    // PMREM 환경맵: 같은 하늘 + 도시 불빛 패널 → 물웅덩이/금속에 반사될 빛
+    // 1순위: 실사 HDRI(Poly Haven rooftop_night) 로 반사광 생성
+    const env = this.A.envFromHDR();
+    if (env) { this.scene.environment = env; return; }
+    // 대체: 같은 하늘 + 도시 불빛 패널 → 물웅덩이/금속에 반사될 빛
     const r = this.G.renderer;
     const envScene = new THREE.Scene();
     const sm = this._skyMaterial(4);
@@ -284,8 +321,12 @@ export class World {
     const g = new THREE.PlaneGeometry(SIZE, SIZE, 1, 1);
     g.rotateX(-Math.PI / 2);
     const uv = g.attributes.uv;
-    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * SIZE / 7, uv.getY(i) * SIZE / 7);
-    const mat = this._std(T.asphalt, { ns: 0.9 });
+    const as = this.A.set('asphalt_02');
+    const tile = as ? 3.2 : 7; // 실사 아스팔트 1장 ≈ 3.2m
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * SIZE / tile, uv.getY(i) * SIZE / tile);
+    const mat = as
+      ? new THREE.MeshStandardMaterial({ map: as.map, normalMap: as.normalMap, roughnessMap: as.roughMap, roughness: 0.85, metalness: 0, envMapIntensity: 0.9, color: 0x8a8a8a })
+      : this._std(T.asphalt, { ns: 0.9 });
     mat.userData = { surface: 'ground' };
     const puddle = T.puddle;
     const timeU = this.timeU;
@@ -365,7 +406,8 @@ export class World {
     B(HALF + 0.4, 0, 0, 0.8, 5, HALF * 2, M.wall);
     B(-HALF - 0.4, 0, 0, 0.8, 5, HALF * 2, M.wall);
     // 북쪽 부두: 낮은 방호벽 + 보이지 않는 추락 방지 벽
-    for (let x = -HALF + 1; x < HALF; x += 2.05) this._jersey(x, -HALF + 0.5, 0);
+    if (this.A.models.concrete_road_barrier) for (let x = -HALF + 1; x < HALF; x += 1.56) this.prop('concrete_road_barrier', x, 0, -HALF + 0.5, 0, 1, { group: 'quay', cast: false, surface: 'concrete' });
+    else for (let x = -HALF + 1; x < HALF; x += 2.05) this._jersey(x, -HALF + 0.5, 0);
     this.collider(-HALF, 0, -HALF - 1, HALF, 6, -HALF + 0.2, 'invisible');
     // 부두 가장자리 콘크리트
     B(0, -2.2, -HALF - 1.5, HALF * 2, 2.2, 3, M.barrier, { collide: false });
@@ -375,7 +417,7 @@ export class World {
 
     // ── 사무동 (진입 불가, 유리창) ──
     const ox = 34, oz = -40, ow = 22, od = 14, oh = 14;
-    B(ox, 0, oz, ow, oh, od, M.wall);
+    B(ox, 0, oz, ow, oh, od, M.office);
     for (let f = 0; f < 4; f++) {
       const y = 1.6 + f * 3.2;
       B(ox, y, oz + od / 2 + 0.03, ow - 1.5, 1.6, 0.08, M.glass, { collide: false, uvOff: true });
@@ -409,23 +451,141 @@ export class World {
 
     // ── 트럭 ──
     this._truck(0, 8, Math.PI / 2);
-    // ── 저지 방호벽 / 상자 / 드럼 / 팔레트 ──
-    const jerseys = [[-18, 40, 0], [-15.8, 40, 0], [-20, 30, Math.PI / 2], [6, 20, 0], [8.1, 20, 0], [-8, -10, Math.PI / 2], [-8, -12.1, Math.PI / 2], [22, 46, 0], [40, 52, Math.PI / 2], [-40, 8, 0], [-37.9, 8, 0], [52, -20, Math.PI / 2], [-2, -40, 0], [0.1, -40, 0]];
-    for (const [x, z, r] of jerseys) this._jersey(x, z, r);
-    const crates = [[-16, 22], [-16, 23.25, 1], [-5, 36], [-35, 2], [-33.8, 2], [-35, 2, 1], [24, 3], [38, -24], [38, -22.8], [-50, -45], [-48.8, -45], [-50, -45, 1], [5, -30], [48, 28], [-22, 48]];
-    for (const [x, z, up] of crates) this.box(x, up ? 1.2 : 0, z, 1.2, 1.2, 1.2, M.crate);
-    const drums = [[-14, 26, 0], [-13.4, 26.5, 1], [26, 4.5, 1], [-36, 4, 0], [10, 28, 0], [10.6, 28.4, 1], [-52, 20, 0], [42, -26, 1]];
-    for (const [x, z, c] of drums) this._drum(x, z, c ? M.drumRed : M.drumBlue);
+    // ── 방호벽 / 상자 / 드럼 / 프로판 / 모래(시멘트) 포대 엄폐물 ──
+    const hasM = (n) => !!this.A.models[n];
+    const jerseys = [[-18, 40, 0], [-16.4, 40, 0], [-20, 30, Math.PI / 2], [6, 20, 0], [7.6, 20, 0], [-8, -10, Math.PI / 2], [-8, -11.6, Math.PI / 2], [22, 46, 0], [40, 52, Math.PI / 2], [-40, 8, 0], [-38.4, 8, 0], [52, -20, Math.PI / 2], [-2, -40, 0], [-0.4, -40, 0], [12, 38, 0], [13.6, 38, 0], [-28, -2, Math.PI / 2]];
+    for (const [x, z, r] of jerseys) {
+      // 기존 r=0 은 z 방향으로 긴 배치 → 모델(긴 축 x)은 90° 돌린다
+      if (hasM('concrete_road_barrier')) this.prop('concrete_road_barrier', x, 0, z, r + Math.PI / 2, 1, { surface: 'concrete' });
+      else this._jersey(x, z, r);
+    }
+    const crates = [[-16, 22, 3], [-16, 23.6, 2], [-5, 36, 2], [-35, 2, 3], [-33.6, 2.2, 1], [24, 3, 2], [38, -24, 3], [38, -22.8, 2], [-50, -45, 3], [5, -30, 2], [48, 28, 3], [-22, 48, 2], [-3, 22, 3]];
+    for (const [x, z, h] of crates) {
+      if (hasM('wooden_military_crate')) this.crateStack(x, z, h);
+      else this.box(x, 0, z, 1.2, 1.2, 1.2, M.crate);
+    }
+    const drums = [[-14, 26, 0], [-13.4, 26.6, 1], [26, 4.5, 1], [-36, 4, 0], [10, 28, 0], [10.7, 28.4, 1], [-52, 20, 0], [42, -26, 1], [-6.5, 30.5, 1], [30, 22.2, 1], [-24, -6, 1]];
+    for (const [x, z, c] of drums) {
+      const name = c ? 'Barrel_01' : 'barrel_03';
+      if (hasM(name)) this.prop(name, x, 0, z, Math.random() * 6.28, 1, { surface: 'metal', explosive: c ? { hp: 40, radius: 6.5, dmg: 190 } : null });
+      else this._drum(x, z, c ? M.drumRed : M.drumBlue);
+    }
+    if (hasM('propane_tank')) for (const [x, z] of [[-12.6, 25], [27.2, 5.4], [-37, 5.2], [11.6, 29.4], [-25, -7]]) {
+      for (let k = 0; k < 3; k++) this.prop('propane_tank', x + (k % 2) * 0.38, 0, z + k * 0.36, Math.random() * 6.28, 1, { surface: 'metal', explosive: { hp: 22, radius: 5.5, dmg: 160 } });
+    }
+    if (hasM('old_tyre')) for (const [x, z] of [[-11, 46], [33, 47], [-47, 30], [17, -33]]) this.tyreStack(x, z, 3 + Math.floor(Math.random() * 2));
+    if (hasM('cement_bag')) {
+      // 허리 높이(약 1.1m) 포대 벽 — 앉으면 완전히 숨고, 앉은 채 조준하면 고개를 내밀어 사격
+      for (const [x, z, alongX, n] of [[-9, 34, true, 5], [5, 32, true, 4], [-25, 12, false, 5], [18, 50, true, 4], [41, 6, false, 5], [-3, -14, true, 5], [-46, 44, true, 4], [26, -28, false, 4], [-31, 36, true, 4]]) this.bagWall(x, z, alongX, n);
+    }
     for (const [x, z] of [[-10, 44], [16, -30], [-46, -2], [36, 46]]) { this.box(x, 0, z, 1.2, 0.15, 1.0, M.crate); this.box(x, 0.15, z, 1.1, 0.9, 0.95, M.crate); }
     for (const [x, z] of [[-12.5, 2], [-12.5, 6], [-12.5, 10], [4, 44], [8, 44]]) this._cone(x, z);
 
     // ── 가로등 ──
     const lampPos = [[-9, 18, 0], [-9, 40, 0], [2, -28, Math.PI], [22, 48, Math.PI], [-38, 26, -Math.PI / 2], [38, 16, Math.PI / 2], [-14, -42, 0]];
-    for (const [x, z, r] of lampPos) this._lamp(x, z, r);
+    for (const [x, z, r] of lampPos) { if (hasM('street_lamp_01')) this._lampModel(x, z); else this._lamp(x, z, r); }
 
     // ── 갠트리 크레인 (부두) ──
     this._crane(-22, -52);
     this._crane(26, -52);
+  }
+
+  // ---------------- 모델 배치 (인스턴싱) ----------------
+  prop(name, x, y, z, rotY = 0, scale = 1, o = {}) {
+    const M = this.A.models[name];
+    if (!M) return null;
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(o.rx || 0, rotY, 0, 'YXZ'));
+    const mat = new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(scale, scale, scale));
+    const key = name + (o.group || '');
+    if (!this.placements[key]) this.placements[key] = { name, list: [], cast: o.cast !== false };
+    const rec = { name, mat, refs: [], pos: new THREE.Vector3(x, y, z), collider: null, explosive: null };
+    if (o.collide !== false) {
+      const b = M.box.clone().applyMatrix4(mat);
+      const pad = o.pad || 0;
+      rec.collider = { minX: b.min.x - pad, maxX: b.max.x + pad, minY: Math.max(0, b.min.y), maxY: b.max.y, minZ: b.min.z - pad, maxZ: b.max.z + pad, surface: o.surface || 'metal' };
+      this.colliders.push(rec.collider);
+    }
+    if (o.explosive) {
+      rec.explosive = { ...o.explosive, alive: true, center: M.box.getCenter(new THREE.Vector3()).applyMatrix4(mat) };
+      rec.collider.ref = rec;
+      this.explosives.push(rec);
+    }
+    this.placements[key].list.push(rec);
+    return rec;
+  }
+
+  _finalizeProps() {
+    for (const [key, P] of Object.entries(this.placements)) {
+      const M = this.A.models[P.name];
+      for (const part of M.parts) {
+        const inst = new THREE.InstancedMesh(part.geometry, part.material, P.list.length);
+        const m = new THREE.Matrix4();
+        P.list.forEach((rec, i) => { inst.setMatrixAt(i, m.multiplyMatrices(rec.mat, part.matrix)); rec.refs.push([inst, i]); });
+        inst.castShadow = P.cast; inst.receiveShadow = true;
+        inst.instanceMatrix.needsUpdate = true;
+        inst.computeBoundingSphere();
+        inst.name = key;
+        this.scene.add(inst);
+      }
+    }
+  }
+
+  // 폭발물 제거: 인스턴스를 0 크기로, 충돌체 삭제, 길찾기 갱신
+  destroyProp(rec) {
+    const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+    for (const [inst, i] of rec.refs) { inst.setMatrixAt(i, zero); inst.instanceMatrix.needsUpdate = true; }
+    if (rec.collider) this.colliders = this.colliders.filter((c) => c !== rec.collider);
+    if (rec.explosive) rec.explosive.alive = false;
+    this._buildNavGrid();
+  }
+
+  crateStack(x, z, h) {
+    const r0 = (Math.random() > 0.5 ? 0 : Math.PI / 2);
+    for (let k = 0; k < h; k++) this.prop('wooden_military_crate', x + (Math.random() - 0.5) * 0.06, 0.03 + k * 0.42, z, r0 + (k % 2 ? Math.PI : 0) + (Math.random() - 0.5) * 0.06, 1, { surface: 'wood', collide: false });
+    const M = this.A.models.wooden_military_crate.size;
+    const lx = r0 ? M.z : M.x, lz = r0 ? M.x : M.z;
+    this.collider(x - lx / 2, 0, z - lz / 2, x + lx / 2, 0.03 + h * 0.42, z + lz / 2, 'wood');
+  }
+
+  tyreStack(x, z, n) {
+    for (let k = 0; k < n; k++) this.prop('old_tyre', x + (Math.random() - 0.5) * 0.08, 0.08 + k * 0.16, z + (Math.random() - 0.5) * 0.08, Math.random() * 6.28, 1, { rx: Math.PI / 2, collide: false });
+    this.collider(x - 0.32, 0, z - 0.32, x + 0.32, n * 0.16, z + 0.32, 'wood');
+  }
+
+  bagWall(x, z, alongX, n) {
+    // 포대 0.46×0.18×0.70 m — 긴 변을 벽 방향으로, 6단을 엇갈려 쌓는다
+    const L = 0.66, rows = 6, H = 0.18;
+    for (let r = 0; r < rows; r++) {
+      const off = (r % 2) * L * 0.5;
+      const cnt = n - (r % 2);
+      for (let i = 0; i < cnt; i++) {
+        const d = -((n - 1) * L) / 2 + i * L + off;
+        const px = alongX ? x + d : x, pz = alongX ? z : z + d;
+        this.prop('cement_bag', px + (Math.random() - 0.5) * 0.03, r * H * 0.95, pz + (Math.random() - 0.5) * 0.03, (alongX ? Math.PI / 2 : 0) + (Math.random() - 0.5) * 0.12, 1, { collide: false });
+      }
+    }
+    const half = (n * L) / 2, th = 0.26;
+    if (alongX) this.collider(x - half, 0, z - th, x + half, rows * H * 0.95 + 0.05, z + th, 'concrete');
+    else this.collider(x - th, 0, z - half, x + th, rows * H * 0.95 + 0.05, z + half, 'concrete');
+  }
+
+  _lampModel(x, z) {
+    const S = 1.6;
+    this.prop('street_lamp_01', x, 0, z, Math.random() * 6.28, S, { pad: -0.15, surface: 'metal' });
+    // 등 유리 발광
+    const M = this.A.models.street_lamp_01;
+    for (const p of M.parts) for (const m of [].concat(p.material)) if (/glass/i.test(m.name) && !m.userData.lit) {
+      m.userData.lit = true; m.emissive = new THREE.Color(1.0, 0.55, 0.22); m.emissiveIntensity = 3.5; m.opacity = Math.max(m.opacity, 0.85);
+    }
+    const ly = 3.32 * S;
+    const light = new THREE.PointLight(0xff9340, 42, 22, 2);
+    light.position.set(x, ly - 0.15, z);
+    this.scene.add(light);
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(2.9, ly - 0.3, 32, 1, true), this._beamMat());
+    cone.position.set(x, (ly - 0.3) / 2, z);
+    cone.renderOrder = 5;
+    this.scene.add(cone);
+    this.lamps.push({ light, cone, pos: new THREE.Vector3(x, ly, z) });
   }
 
   _jersey(x, z, rot) {
@@ -742,7 +902,7 @@ export class World {
 
   // 레이 vs AABB 목록 + 지면. 반환 {t, normal, surface} 또는 null
   raycast(o, d, maxT = 300) {
-    let best = maxT, bn = null, bs = null;
+    let best = maxT, bn = null, bs = null, br = null;
     if (d.y < -1e-6) {
       const t = -o.y / d.y;
       if (t > 0 && t < best) { best = t; bn = [0, 1, 0]; bs = 'ground'; }
@@ -763,10 +923,10 @@ export class World {
       if (tmax < Math.max(tmin, 0) || tmin >= best || tmin < 0) continue;
       best = tmin;
       bn = [0, 0, 0]; bn[ax] = ax === 0 ? -Math.sign(d.x) : ax === 1 ? -Math.sign(d.y) : -Math.sign(d.z);
-      bs = b.surface;
+      bs = b.surface; br = b.ref;
     }
     if (!bn) return null;
-    return { t: best, normal: new THREE.Vector3(bn[0], bn[1], bn[2]), surface: bs };
+    return { t: best, normal: new THREE.Vector3(bn[0], bn[1], bn[2]), surface: bs, ref: br || null };
   }
 
   lineOfSight(a, b) {

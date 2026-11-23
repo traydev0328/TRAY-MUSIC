@@ -1,11 +1,14 @@
 // 플레이어 — 캡슐 충돌 이동, 점프/앉기/질주, 카메라(흔들림·반동·머리 흔들림), 체력 재생
 import * as THREE from 'three';
 
-const STAND = 1.75, CROUCH = 1.12, EYE_OFF = 0.13, R = 0.34, STEP = 0.5;
+// 앉으면 눈높이 약 0.87m → 허리 높이(1.1m) 포대 벽 뒤에 완전히 숨는다. 앉은 채 조준하면 PEEK 높이로 고개를 내민다.
+const STAND = 1.75, CROUCH = 1.0, PEEK = 1.46, EYE_OFF = 0.13, R = 0.34, STEP = 0.5;
 
 export class Player {
   constructor(G) {
     this.G = G;
+    this.id = 'local';
+    this.isLocal = true;
     this.cam = G.camera;
     this.pos = new THREE.Vector3();
     this.vel = new THREE.Vector3();
@@ -32,6 +35,8 @@ export class Player {
     this.recoilP = this.recoilY = 0; this.shakeAmt = 0;
   }
 
+  get crouch() { return this.height < 1.5; }
+
   get eye() { return new THREE.Vector3(this.pos.x, this.pos.y + this.height - EYE_OFF, this.pos.z); }
 
   shake(a) { this.shakeAmt = Math.min(1.2, this.shakeAmt + a); }
@@ -46,7 +51,7 @@ export class Player {
     this.G.hud.damage(from, amount);
     this.G.audio.playerHit();
     if (this.G.settings.haptics && navigator.vibrate) try { navigator.vibrate(25); } catch (e) { /* 미지원 */ }
-    if (this.hp <= 0) { this.hp = 0; this.alive = false; this.G.gameOver(); }
+    if (this.hp <= 0) { this.hp = 0; this.alive = false; this.G.onLocalDeath(); }
   }
 
   update(dt) {
@@ -65,7 +70,7 @@ export class Player {
     this.pitch = Math.max(-1.5, Math.min(1.5, this.pitch));
 
     // ── 자세 ──
-    const wantH = I.crouch ? CROUCH : STAND;
+    const wantH = I.crouch ? (I.ads ? PEEK : CROUCH) : STAND;
     if (wantH > this.height) {
       const ceil = W.ceilingAt(this.pos.x, this.pos.z, R, this.pos.y + this.height, this.pos.y + wantH + 0.05);
       if (ceil > this.pos.y + wantH) this.height = Math.min(wantH, this.height + dt * 5);
