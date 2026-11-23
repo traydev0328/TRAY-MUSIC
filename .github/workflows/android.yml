@@ -57,27 +57,34 @@ jobs:
       - name: Build
         run: |
           if [ "$SIGNED" = "true" ]; then
-            gradle --no-daemon :app-mobile:assembleRelease
+            gradle --no-daemon :app-mobile:assembleRelease :app-wear:assembleRelease
           else
-            gradle --no-daemon :app-mobile:assembleDebug
+            gradle --no-daemon :app-mobile:assembleDebug :app-wear:assembleDebug
           fi
 
       - name: Collect APK + checksum + signing fingerprint
         run: |
           mkdir -p out
-          APK=$(find app-mobile/build/outputs/apk -name "*.apk" | head -n1)
-          cp "$APK" out/TRAY_MUSIC_MOBILE.apk
+          cp "$(find app-mobile/build/outputs/apk -name '*.apk' | head -n1)" out/TRAY_MUSIC_MOBILE.apk
+          cp "$(find app-wear/build/outputs/apk -name '*.apk' | head -n1)" out/TRAY_MUSIC_WEAR.apk
           cd out
-          sha256sum TRAY_MUSIC_MOBILE.apk > TRAY_MUSIC_MOBILE.apk.sha256
+          sha256sum TRAY_MUSIC_MOBILE.apk TRAY_MUSIC_WEAR.apk > SHA256SUMS.txt
           BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -n1)
-          "$BT/apksigner" verify --print-certs TRAY_MUSIC_MOBILE.apk > SIGNING_CERT.txt
-          echo "signed_with_personal_key=$SIGNED" >> SIGNING_CERT.txt
-          cat SIGNING_CERT.txt TRAY_MUSIC_MOBILE.apk.sha256
+          {
+            echo "== MOBILE"; "$BT/apksigner" verify --print-certs TRAY_MUSIC_MOBILE.apk
+            echo "== WEAR";   "$BT/apksigner" verify --print-certs TRAY_MUSIC_WEAR.apk
+            echo "signed_with_personal_key=$SIGNED"
+          } > SIGNING_CERT.txt
+          cat SIGNING_CERT.txt SHA256SUMS.txt
+          # 두 APK 서명 인증서가 같아야 Data Layer 통신 가능
+          M=$("$BT/apksigner" verify --print-certs TRAY_MUSIC_MOBILE.apk | grep SHA-256)
+          W=$("$BT/apksigner" verify --print-certs TRAY_MUSIC_WEAR.apk | grep SHA-256)
+          if [ "$M" != "$W" ]; then echo "::warning::휴대폰/워치 서명 불일치 (개인 서명 키 Secrets 필요)"; fi
 
       - name: Unit tests
         run: gradle --no-daemon :app-mobile:testDebugUnitTest
 
       - uses: actions/upload-artifact@v4
         with:
-          name: TRAY_MUSIC_MOBILE
+          name: TRAY_MUSIC_APKS
           path: out/

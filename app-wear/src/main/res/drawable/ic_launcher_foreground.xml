@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 단순 음표 아이콘 (원본 디자인) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M62,32 L62,64 A8,8 0,1,1 56,56.5 L56,40 L46,42.5 L46,70 A8,8 0,1,1 40,62.5 L40,38 Z" />
+</vector>

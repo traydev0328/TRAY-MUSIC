@@ -47,7 +47,7 @@ class TrayWearListenerService : WearableListenerService() {
             val c = (application as TrayApp).container
             val md = mc.mediaMetadata
             val playing = mc.playWhenReady
-            c.appScope.launch {
+            (application as TrayApp).appScope.launch {
                 runCatching { c.watch.sendNowPlaying(md.title?.toString().orEmpty(), md.artist?.toString().orEmpty(), playing) }
             }
             // 명령 반영 후 해제 (세션은 서비스가 유지)
