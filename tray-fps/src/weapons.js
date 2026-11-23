@@ -417,7 +417,7 @@ export class Weapons {
     this.vmCam.quaternion.copy(G.camera.quaternion);
 
     const m = this.models[this.cur];
-    const hip = new THREE.Vector3(0.155, -0.155, -0.36);
+    const hip = d.slot === 2 ? new THREE.Vector3(0.1, -0.1, -0.32) : new THREE.Vector3(0.155, -0.155, -0.36); // 권총은 더 높고 중앙 쪽
     const adsP = new THREE.Vector3(0, -(m.sightY ?? d.sightY), m.adsZ ?? d.adsZ); // 실사 총기는 모델별 계산값
     const pos = hip.lerp(adsP, this.adsT);
     const [lx, ly] = [I.lookX, I.lookY];

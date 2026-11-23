@@ -75,7 +75,9 @@ export function buildRealViewmodel(W, id, def, src) {
   return {
     root, gun: g, flash, muzzle, port, real: true, generic: true,
     mag: new THREE.Object3D(), magHome: new THREE.Vector3(),
-    rightHand: new THREE.Vector3(0, gripY, gripZ), leftHand: new THREE.Vector3(0, -0.03, (b2.min.z + off.z) * 0.55),
+    rightHand: new THREE.Vector3(0, gripY, gripZ),
+    // 권총: 왼손이 오른손을 감싸는 양손 파지 / 그 외: 총열 아래
+    leftHand: def.slot === 2 ? new THREE.Vector3(-0.025, gripY - 0.01, gripZ - 0.02) : new THREE.Vector3(0, -0.03, (b2.min.z + off.z) * 0.55),
     sightY, adsZ,
   };
 }
