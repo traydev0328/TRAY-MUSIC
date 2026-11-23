@@ -1,6 +1,7 @@
 // 실사 에셋 로더 — Poly Haven CC0 스캔 텍스처/모델/HDRI. 실패하면 null 을 돌려주고 절차적 대체물을 쓴다.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
 const BASE = new URL('../assets/', import.meta.url).href;
 
@@ -97,6 +98,17 @@ export class Assets {
     jobs.push(fetch(`${BASE}hdri/day_sky.json`).then((r) => r.json()).then((j) => { this.daySun = j.sun; }).catch(() => {}));
     await Promise.all(jobs);
     this._dayLoaded = true;
+  }
+
+  // 실사 캐릭터·총기 (Sketchfab CC-BY, meshopt 무손실 압축 + WebP). 원본 씬과 애니메이션을 그대로 보관
+  async loadReal(ids = ['swat', 'fsb', 'm16']) {
+    this.real = this.real || {};
+    const gl = new GLTFLoader(); gl.setMeshoptDecoder(MeshoptDecoder);
+    await Promise.all(ids.filter((id) => !this.real[id]).map((id) => gl.loadAsync(`${BASE}real/${id}/${id}.json`).then((g) => {
+      g.scene.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = !o.isSkinnedMesh; [].concat(o.material).forEach((m) => { if (m.map) m.map.anisotropy = Math.min(8, this.maxAniso); }); } });
+      this.real[id] = { scene: g.scene, animations: g.animations };
+    }).catch((e) => { this.failed.push(`real/${id}`); console.warn('real asset fail', id, e); })));
+    return this.real;
   }
 
   // 텍스처 세트 → MeshStandardMaterial 옵션

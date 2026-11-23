@@ -25,3 +25,14 @@
 | HDRI | rooftop_night (1K) | 환경 반사광(최대 밝기 제한 후 사용) | — |
 
 합계 약 9.7MB. 로드에 실패한 항목은 코드로 만든 절차적 대체물이 자동으로 쓰입니다.
+
+## 실사 캐릭터·총기 (Sketchfab, CC BY 4.0 — 저작자 표시 필수)
+
+| 모델 | 제작자 | 출처 | 사용처 |
+|---|---|---|---|
+| S.W.A.T. Operator - Remastered | jeandiz | https://sketchfab.com/3d-models/732d2eec5a0c456bafedd08af35134c3 | 공격팀(알파) 대원 |
+| FSB Operator | jeandiz | https://sketchfab.com/3d-models/43a561e941704eefb1ab0614be4f0049 | 수비팀(브라보) 대원 |
+| M16 Assault Rifle | jeandiz | https://sketchfab.com/3d-models/339d0f7b21024387853dd926a5d51b50 | 1인칭 소총 |
+
+라이선스: https://creativecommons.org/licenses/by/4.0/
+변경 사항: 형상은 meshopt 무손실 압축(폴리곤·좌표 원본 유지), 텍스처는 해상도 유지한 WebP(품질 92~95) 변환, 게임용 판정 박스·팀 완장 추가.

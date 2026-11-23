@@ -75,7 +75,10 @@ class Teammate {
   get crouch() { return this.h < 1.5; }
   ensureAvatar() {
     if (this.avatar) return;
-    this.avatar = new Operator(this.G, this.p, this.name);
+    // 팀 대전: 알파=공격팀 장비(SWAT), 브라보=수비팀 장비(FSB) / 그 외: 번갈아
+    const M = this.G.match, idx = [...this.G.net.mates.keys()].indexOf(this.id);
+    const variant = M.mode === 'tdm' ? (M.teamOf(this.id) === 0 ? 'swat' : 'fsb') : (idx % 2 ? 'fsb' : 'swat');
+    this.avatar = new Operator(this.G, this.p, this.name, variant);
     this.avatar.pos.copy(this.p);
     this.avatar.root.userData.mate = this;
     this.avatar.tag.raycast = () => {}; // 이름표는 사격 판정 제외

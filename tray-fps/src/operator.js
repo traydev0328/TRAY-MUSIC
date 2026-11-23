@@ -222,3 +222,70 @@ export function buildOperator(op) {
   };
   op.radius = 0.36; op.eyeH = 1.72;
 }
+
+// ─────────── 실사 대원 (Sketchfab CC-BY, Mixamo 뼈대) ───────────
+import { clone as skClone } from 'three/addons/utils/SkeletonUtils.js';
+
+const boneName = (n) => n.replace(/^.*mixamorig:?/, '').replace(/_\d+$/, '').replace(/_end$/, '');
+
+// 실사 모델을 Operator 에 연결: 크기 보정, 뼈 매핑, 대기 동작, 판정 박스, 팀 완장
+export function buildRealOperator(op, variant) {
+  const G = op.G, src = G.assets.real[variant] || G.assets.real.swat;
+  const s = skClone(src.scene);
+  const bones = {};
+  s.traverse((o) => { if (o.isBone) { const k = boneName(o.name); if (!bones[k]) bones[k] = o; } if (o.isMesh) o.raycast = () => {}; });
+  // 크기: 머리 뼈 높이를 1.62m 에 맞추고 발을 지면에
+  s.updateMatrixWorld(true);
+  const wp = (b) => b.getWorldPosition(new THREE.Vector3());
+  const headY = wp(bones.Head).y, footY = Math.min(wp(bones.LeftToeBase || bones.LeftFoot).y, wp(bones.RightToeBase || bones.RightFoot).y);
+  const k = (1.62 - 0.05) / (headY - footY);
+  s.scale.multiplyScalar(k); s.updateMatrixWorld(true);
+  s.position.y -= Math.min(wp(bones.LeftToeBase || bones.LeftFoot).y, wp(bones.RightToeBase || bones.RightFoot).y) - 0.03;
+  op.root.add(s);
+  const rest = new Map(); for (const b of Object.values(bones)) rest.set(b, b.quaternion.clone());
+  let mixer = null;
+  if (src.animations.length) { mixer = new THREE.AnimationMixer(s); mixer.clipAction(src.animations[0]).play(); mixer.update(Math.random() * 3); }
+  // 판정 박스 (보이지 않음, 레이캐스트 전용)
+  const hm = new THREE.MeshBasicMaterial({ visible: false });
+  // 뼈마다 실제 월드 배율이 다르다(모델 내부 단위 변환 포함) → 판정 박스를 미터 단위로 맞추려면 각 뼈의 월드 배율로 나눠야 함
+  s.updateMatrixWorld(true);
+  const ws = (o) => o.getWorldScale(new THREE.Vector3()).x;
+  const hit = (bone, geo, part, off = [0, 0, 0]) => { if (!bone) return; const w = ws(bone); const m = new THREE.Mesh(geo, hm); m.userData.part = part; m.position.set(...off).divideScalar(w); m.scale.setScalar(1 / w); bone.add(m); };
+  hit(bones.Head, new THREE.SphereGeometry(0.13, 10, 8), 'head', [0, 0.08, 0.02]);
+  hit(bones.Spine2 || bones.Spine1, new THREE.BoxGeometry(0.42, 0.42, 0.3), 'body', [0, 0.05, 0]);
+  hit(bones.Hips, new THREE.BoxGeometry(0.36, 0.26, 0.26), 'body');
+  for (const sd of ['Left', 'Right']) {
+    hit(bones[`${sd}UpLeg`], new THREE.CylinderGeometry(0.09, 0.08, 0.44, 8), 'body', [0, 0.22, 0]);
+    hit(bones[`${sd}Leg`], new THREE.CylinderGeometry(0.07, 0.06, 0.44, 8), 'body', [0, 0.22, 0]);
+    hit(bones[`${sd}Arm`], new THREE.CylinderGeometry(0.06, 0.055, 0.3, 8), 'body', [0, 0.15, 0]);
+    hit(bones[`${sd}ForeArm`], new THREE.CylinderGeometry(0.05, 0.045, 0.28, 8), 'body', [0, 0.14, 0]);
+  }
+  // 팀 완장 (왼팔 위)
+  op.visorMat = new THREE.MeshBasicMaterial({ color: 0x40ff80 });
+  if (bones.LeftArm) { const w = ws(bones.LeftArm); const band = new THREE.Mesh(new THREE.CylinderGeometry(0.068, 0.068, 0.05, 16, 1, true), op.visorMat); band.position.y = 0.12 / w; band.scale.setScalar(1 / w); band.raycast = () => {}; bones.LeftArm.add(band); }
+  op.real = { s, bones, rest, mixer, k, hipsW: bones.Hips && bones.Hips.parent ? ws(bones.Hips.parent) : k };
+  op.rig = { muzzle: new THREE.Object3D() };
+  op.rig.muzzle.position.set(0.12, 1.42, 0.75); op.root.add(op.rig.muzzle);
+  op.radius = 0.36; op.eyeH = 1.66;
+}
+
+// 뼈 단위 절차적 동작: 걷기(다리), 앉기, 상체 조준 기울기. 대기 동작(mixer)은 그 위에 덧입힘
+const _q = new THREE.Quaternion(), _ax = new THREE.Vector3(1, 0, 0);
+export const LEG_SIGN = -1; // 화면 확인으로 조정한 Mixamo 다리 회전 방향
+export function animateReal(op, dt, speed, crouch, pitch) {
+  const R = op.real; if (!R) return;
+  if (R.mixer) R.mixer.update(dt);
+  const B = R.bones;
+  const set = (b, ang) => { if (!b) return; const base = R.mixer ? b.quaternion.clone() : R.rest.get(b).clone(); b.quaternion.copy(base.multiply(_q.setFromAxisAngle(_ax, ang))); };
+  op.walkT = (op.walkT || 0) + dt * speed * 2.4;
+  const a = Math.min(1, speed / 2.5);
+  for (const [sd, ph0] of [['Left', 0], ['Right', Math.PI]]) {
+    const ph = op.walkT + ph0;
+    set(B[`${sd}UpLeg`], LEG_SIGN * (Math.sin(ph) * 0.5 * a + crouch * 1.15));
+    set(B[`${sd}Leg`], -LEG_SIGN * (Math.max(0, -Math.cos(ph)) * 0.85 * a + crouch * 2.0));
+    set(B[`${sd}Foot`], LEG_SIGN * crouch * 0.85);
+  }
+  set(B.Spine1, -pitch * 0.35);
+  set(B.Spine2, -pitch * 0.35);
+  if (B.Hips) { const rp = R.restHipsY ?? (R.restHipsY = B.Hips.position.y); B.Hips.position.y = rp - (crouch * 0.42 + Math.abs(Math.cos(op.walkT)) * 0.03 * a) / R.hipsW; }
+}

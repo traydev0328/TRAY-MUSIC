@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import * as TX from './textures.js';
-import { buildOperator } from './operator.js';
+import { buildOperator, buildRealOperator, animateReal } from './operator.js';
 
 export const TYPES = {
   warden:  { hp: 110, speed: 3.1, dmg: 7,  burst: [3, 5], rof: 0.13, acc: 0.42, range: 34, score: 100, scale: 1,    name: '워든' },
@@ -75,8 +75,8 @@ function mats() {
 function glowMat(color, k) { return new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(k), toneMapped: true }); }
 
 export class Enemy {
-  constructor(G, type, pos, { puppet = false, id = 0 } = {}) {
-    this.G = G; this.type = type; this.T = TYPES[type];
+  constructor(G, type, pos, { puppet = false, id = 0, variant = null } = {}) {
+    this.G = G; this.type = type; this.T = TYPES[type]; this.variant = variant;
     this.id = id; this.puppet = puppet;
     this.hp = this.T.hp; this.alive = true;
     this.pos = pos.clone();
@@ -488,9 +488,10 @@ export class Drone extends Enemy {
 // 멀티플레이 아군 대원 아바타 (같은 리그, 전술복 재질)
 export class Operator extends Enemy {
   get skin() { return 'operator'; }
-  build() { buildOperator(this); } // 사실적 전술 대원 모델 (operator.js)
-  constructor(G, pos, name) {
-    super(G, 'warden', pos, { puppet: true });
+  // 실사 모델(Sketchfab)이 있으면 사용, 없으면 코드 생성 모델
+  build() { if (this.G.assets.real && (this.G.assets.real.swat || this.G.assets.real.fsb)) buildRealOperator(this, this.variant || 'swat'); else buildOperator(this); }
+  constructor(G, pos, name, variant = 'swat') {
+    super(G, 'warden', pos, { puppet: true, variant });
     this.root.userData.enemy = null; // 사격 판정 대상 아님
     this.name = name;
     this.tag = makeTag(name);
@@ -503,6 +504,14 @@ export class Operator extends Enemy {
     this.pos.lerp(this.netPos, k);
     let d = this.netYaw - this.yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); this.yaw += d * k;
     this.vel.set((this.pos.x - px) / Math.max(dt, 1e-3), 0, (this.pos.z - pz) / Math.max(dt, 1e-3));
+    if (this.real) {
+      const crouchR = Math.max(0, Math.min(1, (1.75 - this.netH) / 0.75));
+      animateReal(this, dt, Math.hypot(this.vel.x, this.vel.z), crouchR, this.netPitch);
+      this.downT += ((this.netAlive ? 0 : 1) - this.downT) * Math.min(1, dt * 4);
+      this.root.position.set(this.pos.x, this.pos.y + this.downT * 0.15, this.pos.z);
+      this.root.rotation.set(-this.downT * 1.45, this.yaw, 0, 'YXZ');
+      return;
+    }
     const R = this.rig;
     const sp = Math.hypot(this.vel.x, this.vel.z);
     this.walkT += dt * sp * 2.4;

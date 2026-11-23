@@ -288,6 +288,8 @@ async function boot() {
   // 실사 에셋 (약 9.7MB) — 실패한 항목은 절차적 대체물 사용
   G.assets = new Assets(renderer);
   await G.assets.loadAll((p, label) => progress(0.02 + p * 0.5, label ? `실사 에셋 받는 중 · ${label}` : null));
+  progress(0.5, '실사 대원·총기 모델 받는 중');
+  await G.assets.loadReal();
   if (G.assets.failed.length) console.warn('일부 에셋 대체:', G.assets.failed);
 
   G.world = new World(G, G.assets, settings.map);

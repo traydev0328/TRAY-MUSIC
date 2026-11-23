@@ -31,6 +31,7 @@ export class Weapons {
     this.models = { rifle: this._buildRifle(), shotgun: this._buildShotgun() };
     for (const k in this.models) { this.models[k].root.visible = false; this.holder.add(this.models[k].root); }
     this.arms = this._buildArms();
+    if (G.assets && G.assets.real && G.assets.real.m16) this._applyRealRifle(G.assets.real.m16);
     this.state = {
       rifle: { mag: WEAPONS.rifle.mag, reserve: WEAPONS.rifle.reserve },
       shotgun: { mag: WEAPONS.shotgun.mag, reserve: WEAPONS.shotgun.reserve },
@@ -137,6 +138,43 @@ export class Weapons {
     const port = new THREE.Object3D(); port.position.set(0.03, 0.035, -0.08); gun.add(port);
     root.traverse((o) => { if (o.isMesh) o.frustumCulled = false; });
     return { root, gun, mag, flash, muzzle, port, magHome: mag.position.clone(), leftHand: new THREE.Vector3(-0.005, -0.005, -0.42), rightHand: new THREE.Vector3(0, -0.075, 0.015) };
+  }
+
+  // 실사 M16(Sketchfab CC-BY, 단위 mm → 0.001배)으로 교체. 붉은 점 조준경은 레일 위에 그대로 장착
+  _applyRealRifle(real) {
+    const m = this.models.rifle, gun = m.gun;
+    const keep = new Set([m.flash, m.muzzle, m.port]);
+    const optic = gun.children.filter((c) => c.isMesh && Math.abs(c.position.x) < 1e-6 && c.position.y >= 0.069 && c.position.z <= -0.08 && c.position.z >= -0.16);
+    for (const c of [...gun.children]) if (!keep.has(c) && !optic.includes(c)) gun.remove(c);
+    const model = real.scene.clone(true);
+    model.scale.setScalar(0.001);
+    model.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.frustumCulled = false; } });
+    gun.add(model);
+    // 부품 이름으로 실제 위치를 찾아 정렬 (총 그룹 좌표계 기준 bbox)
+    gun.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(gun.matrixWorld).invert();
+    const part = (re) => { let f = null; model.traverse((o) => { if (!f && o.isMesh && re.test(o.name)) f = o; }); return f; };
+    const boxOf = (o) => { const b = new THREE.Box3(); if (!o) return null; o.geometry.computeBoundingBox(); return b.copy(o.geometry.boundingBox).applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld)); };
+    const rail = boxOf(part(/RAIL/i)) || boxOf(part(/BODY/i));
+    const grip = boxOf(part(/GRIP/i));
+    const barrel = boxOf(part(/BARREL/i));
+    // 실총 기계식 조준기(가늠자·가늠쇠)로 조준 → 가짜 조준경 제거
+    const front = boxOf(part(/FRONT_SIGHT/i)), rear = boxOf(part(/REAR_SIGHT/i));
+    optic.forEach((c) => gun.remove(c));
+    if (barrel) { const cy = (barrel.min.y + barrel.max.y) / 2; m.muzzle.position.set(0, cy, barrel.min.z - 0.01); m.flash.position.set(0, cy, barrel.min.z); m.leftHand.set(0, cy - 0.035, barrel.min.z * 0.55 + rail.min.z * 0.45); }
+    if (grip) m.rightHand.set(0, (grip.min.y + grip.max.y) / 2 + 0.01, (grip.min.z + grip.max.z) / 2);
+    m.debugSight = { rear: rear && [rear.min.y, rear.max.y, rear.min.z, rear.max.z], front: front && [front.min.y, front.max.y, front.min.z] };
+    m.port.position.set(0.025, rail.min.y - 0.01, (rail.min.z + rail.max.z) / 2 + 0.03);
+    // 탄창은 총 그룹으로 분리 (미터 단위로 재장전 애니메이션)
+    const magMesh = part(/MAGAZINE/i);
+    if (magMesh) { gun.attach(magMesh); m.mag = magMesh; } else { m.mag = new THREE.Object3D(); gun.add(m.mag); }
+    m.magHome = m.mag.position.clone();
+    // 조준선 높이 = 가늠쇠 끝, 눈은 가늠자 뒷면에서 7cm 뒤
+    // 가늠자 구멍(조준 링) 중심 높이 ≈ 가늠자 상단에서 높이의 13% 아래 (화면 측정으로 보정)
+    const sightY = rear ? rear.max.y - (rear.max.y - rear.min.y) * 0.13 : (front ? front.max.y - 0.003 : rail.max.y + 0.02);
+    const adsZ = rear ? -(rear.max.z + 0.07) : -0.1;
+    WEAPONS.rifle.sightY = sightY; WEAPONS.rifle.adsZ = adsZ; WEAPONS.rifle.adsFov = 0.75; WEAPONS.rifle.name = 'M16A3 소총';
+    m.real = true;
   }
 
   _buildShotgun() {
