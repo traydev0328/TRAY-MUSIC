@@ -36,3 +36,22 @@
 
 라이선스: https://creativecommons.org/licenses/by/4.0/
 변경 사항: 형상은 meshopt 무손실 압축(폴리곤·좌표 원본 유지), 텍스처는 해상도 유지한 WebP(품질 92~95) 변환, 게임용 판정 박스·팀 완장 추가.
+
+## 실사 총기 12종 (Sketchfab, CC BY 4.0)
+
+| 모델 | 제작자 | 출처 | 게임 내 명칭 |
+|---|---|---|---|
+| AK 47 Tactical Upgrade | jeandiz | https://sketchfab.com/3d-models/b15d69e8a5a948819c8c388f97930b9c | AK 전술 개량 소총 |
+| AKS | jeandiz | https://sketchfab.com/3d-models/67eaf310bffa46698ac8e71d3a76e773 | AKS 접철식 소총 |
+| AR-15 style rifle | jeandiz | https://sketchfab.com/3d-models/50d33435445e439c95e3b36e9d4bd798 | AR-15 계열 소총 |
+| M249 Machine Gun | Buce | https://sketchfab.com/3d-models/bf0105376a2d4c37926f3ce95316460d | M-249 분대지원화기 |
+| Desert Eagle | ELIZION | https://sketchfab.com/3d-models/cabde59f5cf24effaf80536e35d04e95 | D-50 대구경 권총 |
+| Pistol with Engravings | jeandiz | https://sketchfab.com/3d-models/bccd75a0016d49448243135a56facb96 | P-9 각인 권총 |
+| Remington 870 Police Magnum 12 Gauge Shotgun | haoliu95 | https://sketchfab.com/3d-models/eea11de7e9d24b6683962b8388c319eb | M-870 펌프 산탄총 |
+| M4 Super 90 (JW2) Brand-Friendly version | haoliu95 | https://sketchfab.com/3d-models/7e472e24152246708cac8b6f1613c7a8 | M-4 반자동 산탄총 |
+| HK MP5 SMG | dani-zzz | https://sketchfab.com/3d-models/fad0226e1dcf4af180f707a5509d3a4e | MP-5 기관단총 |
+| Modular P90 Tactical | doomsentinel | https://sketchfab.com/3d-models/080897fc0366455884b1a916684313fe | P-90 전술 기관단총 |
+| L115A3 | Oxenci | https://sketchfab.com/3d-models/b3a829d236004a769c0b3ac07cc3a9ad | L-115 장거리 저격총 |
+| M40A3 Sniper Rifle | 3danalyst | https://sketchfab.com/3d-models/861c37a0373e4362b964ff526fc620c4 | M-40 볼트액션 저격총 |
+
+변경 사항: meshopt 무손실 압축, 텍스처 WebP(해상도 유지), 1인칭 자동 정렬(축·축척·손 위치·조준선). 게임 내 명칭은 실총 상표 대신 별도 표기.

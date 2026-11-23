@@ -2,6 +2,9 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import * as TX from './textures.js';
+import { GUNS, PRIMARIES, SECONDARIES } from './arsenal.js';
+import { buildRealViewmodel } from './realgun.js';
+import { settings } from './config.js';
 
 export const WEAPONS = {
   rifle: {
@@ -15,6 +18,9 @@ export const WEAPONS = {
     reload: 2.9, range: 70, falloff: [7, 26, 0.25], adsFov: 0.84, sightY: 0.062, adsZ: -0.14, kick: 0.09, tracerEvery: 3,
   },
 };
+
+Object.assign(WEAPONS, GUNS); // 실사 총기 13종
+WEAPONS.rifle.cls = '소총'; WEAPONS.shotgun.cls = '산탄총';
 
 const _v = new THREE.Vector3(), _q = new THREE.Quaternion();
 
@@ -32,11 +38,9 @@ export class Weapons {
     for (const k in this.models) { this.models[k].root.visible = false; this.holder.add(this.models[k].root); }
     this.arms = this._buildArms();
     if (G.assets && G.assets.real && G.assets.real.m16) this._applyRealRifle(G.assets.real.m16);
-    this.state = {
-      rifle: { mag: WEAPONS.rifle.mag, reserve: WEAPONS.rifle.reserve },
-      shotgun: { mag: WEAPONS.shotgun.mag, reserve: WEAPONS.shotgun.reserve },
-    };
-    this.order = ['rifle', 'shotgun'];
+    this.state = {};
+    for (const k of Object.keys(WEAPONS)) this.state[k] = { mag: WEAPONS[k].mag, reserve: WEAPONS[k].reserve };
+    this.order = this.loadout();
     this.cur = 'rifle';
     this.def = WEAPONS.rifle;
     this.adsT = 0; this.sprintT = 0;
@@ -47,11 +51,41 @@ export class Weapons {
     this._show('rifle');
   }
 
+  // 장비: 주무기 + 보조무기 (메뉴 '무기고'에서 선택, 설정에 저장)
+  loadout() {
+    const p = PRIMARIES.includes(settings.primary) ? settings.primary : 'rifle';
+    const s = SECONDARIES.includes(settings.secondary) ? settings.secondary : 'p_engraved';
+    return [p, s];
+  }
+
+  // 선택된 실사 총기 모델을 필요할 때만 받아서 준비
+  // 동시에 여러 번 불려도 순서대로 처리 (게임 시작과 장비 변경이 겹칠 때의 경쟁 상태 방지)
+  prepareLoadout() {
+    this._prep = (this._prep || Promise.resolve()).then(() => this._prepareLoadout()).catch((e) => console.warn('loadout', e));
+    return this._prep;
+  }
+
+  async _prepareLoadout() {
+    this.order = this.loadout();
+    for (const id of this.order) {
+      if (this.models[id]) continue;
+      const d = WEAPONS[id];
+      if (!d.asset) continue;
+      const R = await this.G.assets.loadReal([d.asset]);
+      if (!R[d.asset]) continue;
+      const m = buildRealViewmodel(this, id, d, R[d.asset]);
+      m.root.visible = false; this.holder.add(m.root);
+      this.models[id] = m;
+    }
+    // 끝난 시점의 최신 선택 기준으로 확정. 모델을 못 받은 무기만 기본 총으로 대체
+    this.order = this.loadout().map((id) => (this.models[id] ? id : (WEAPONS[id].slot === 2 ? 'shotgun' : 'rifle')));
+  }
+
   reset() {
     for (const k of this.order) { this.state[k].mag = WEAPONS[k].mag; this.state[k].reserve = WEAPONS[k].reserve; }
     this.cool = 0; this.reloadT = -1; this.swapT = -1; this.bloom = 0; this.adsT = 0;
     this.stats = { shots: 0, hits: 0 };
-    this._show('rifle');
+    this._show(this.order[0]);
   }
 
   _lights() {
@@ -331,8 +365,8 @@ export class Weapons {
     G.audio.gunshot(this.cur);
     // 탄피 배출
     const port = m.port.getWorldPosition(new THREE.Vector3());
-    if (this.cur === 'rifle') G.effects.shell(port, right.clone().multiplyScalar(2.2 + Math.random()).addScaledVector(up, 1.4 + Math.random() * 0.6).addScaledVector(fwd, 0.4).add(G.player.vel));
-    else this.pumpT = 0.12;
+    if (this.cur === 'shotgun' || d.pump) this.pumpT = 0.12;
+    else G.effects.shell(port, right.clone().multiplyScalar(2.2 + Math.random()).addScaledVector(up, 1.4 + Math.random() * 0.6).addScaledVector(fwd, 0.4).add(G.player.vel), d.pellets > 1);
     if (G.settings.haptics && navigator.vibrate) try { navigator.vibrate(this.cur === 'shotgun' ? 30 : 12); } catch (e) { /* 미지원 */ }
   }
 
@@ -343,8 +377,8 @@ export class Weapons {
 
     if (I.take('reload')) this.startReload();
     if (I.take('swap')) this.swap();
-    if (I.take('slot1')) this.swap('rifle');
-    if (I.take('slot2')) this.swap('shotgun');
+    if (I.take('slot1')) this.swap(this.order[0]);
+    if (I.take('slot2')) this.swap(this.order[1]);
     if (I.take('grenade') && this.throwT < 0 && this.swapT < 0 && G.player.alive) {
       if (G.combat.playerThrow()) { this.throwT = 0; this.reloadT = -1; }
     }
@@ -384,7 +418,7 @@ export class Weapons {
 
     const m = this.models[this.cur];
     const hip = new THREE.Vector3(0.155, -0.155, -0.36);
-    const adsP = new THREE.Vector3(0, -d.sightY, d.adsZ);
+    const adsP = new THREE.Vector3(0, -(m.sightY ?? d.sightY), m.adsZ ?? d.adsZ); // 실사 총기는 모델별 계산값
     const pos = hip.lerp(adsP, this.adsT);
     const [lx, ly] = [I.lookX, I.lookY];
     this.swayX += (-lx * 0.9 - this.swayX) * Math.min(1, dt * 10) ; this.swayY += (ly * 0.9 - this.swayY) * Math.min(1, dt * 10);
@@ -411,12 +445,18 @@ export class Weapons {
         else if (t < 0.66) mp.set(0, m.magHome.y - 0.35 + (t - 0.6) / 0.06 * 0.35, m.magHome.z);
         else mp.copy(m.magHome);
         if (t > 0.82 && t < 0.92) pos.z += 0.015;
-      } else {
+      } else if (m.pump) {
         const cyc = (t * 4) % 1;
         if (t < 0.85) m.pump.position.z = m.pumpHome + Math.sin(cyc * Math.PI) * 0.01;
       }
     } else if (this.cur === 'rifle') m.mag.position.copy(m.magHome);
     // 펌프 액션
+    if (this.pumpT > 0 && !m.pump) { // 실사 펌프 산탄총: 총 전체를 살짝 당겨 펌프 동작 표현 + 탄피 배출
+      this.pumpT += dt;
+      const k = (this.pumpT - 0.12) / 0.35;
+      if (k > 0 && k < 1) { pos.z += Math.sin(k * Math.PI) * 0.03; rx += Math.sin(k * Math.PI) * 0.05; if (k > 0.45 && !this._ejected) { this._ejected = true; const port = m.port.getWorldPosition(new THREE.Vector3()); const r = new THREE.Vector3(1, 0, 0).applyQuaternion(G.camera.quaternion); G.effects.shell(port, r.multiplyScalar(2).add(new THREE.Vector3(0, 1.5, 0)), true); G.audio.click(1800, 0, 0.25, 0.06); } }
+      if (k >= 1) { this.pumpT = -1; this._ejected = false; }
+    }
     if (this.cur === 'shotgun') {
       if (this.pumpT > 0) {
         this.pumpT += dt;
@@ -434,6 +474,10 @@ export class Weapons {
     if (this.swapT >= 0) { const e = Math.sin(Math.min(1, this.swapT / 0.56) * Math.PI); pos.y -= 0.25 * e; rx -= 0.6 * e; }
     m.root.position.copy(pos);
     m.root.rotation.set(rx, ry, rz);
+    // 저격 조준경: 정조준이 거의 끝나면 조준경 화면으로 전환
+    const scoped = !!d.scope && this.adsT > 0.85 && this.reloadT < 0;
+    m.root.visible = !scoped;
+    if (this._scoped !== scoped) { this._scoped = scoped; const el = document.getElementById('scope'); if (el) el.hidden = !scoped; }
 
     // 섬광
     if (this.flashT > 0) { this.flashT -= dt; if (this.flashT <= 0) { m.flash.visible = false; this.vmFlash.intensity = 0; } }

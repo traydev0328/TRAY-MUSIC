@@ -7,7 +7,8 @@ import { Assets } from './assets.js';
 import { World } from './world.js';
 import { Effects } from './effects.js';
 import { Player } from './player.js';
-import { Weapons } from './weapons.js';
+import { Weapons, WEAPONS } from './weapons.js';
+import { PRIMARIES, SECONDARIES } from './arsenal.js';
 import { Enemies } from './enemies.js';
 import { Combat } from './combat.js';
 import { Net } from './net.js';
@@ -420,8 +421,14 @@ function requestImmersive() {
   try { if (navigator.wakeLock) navigator.wakeLock.request('screen').then((l) => { G.wakeLock = l; }).catch(() => {}); } catch (e) { /* 미지원 */ }
 }
 
-function startGame(spawnIdx = 0) {
+async function startGame(spawnIdx = 0) {
   G.audio.init();
+  // 선택한 실사 총기 모델을 필요할 때만 받기
+  if (G.weapons.loadout().some((id) => !G.weapons.models[id])) {
+    $('loading').hidden = false; progress(0.5, '선택한 총기 모델 받는 중');
+    await G.weapons.prepareLoadout();
+    $('loading').hidden = true;
+  } else G.weapons.order = G.weapons.loadout();
   requestImmersive();
   G.enemies.clear(); G.pickups.clear(); G.combat.reset();
   G.weapons.reset();
@@ -571,6 +578,7 @@ function setupMenus() {
     seg.appendChild(b);
   }
   buildGfxRows();
+  buildArmory();
   document.querySelectorAll('#seg-map button').forEach((b) => { b.classList.toggle('on', b.dataset.map === settings.map); b.addEventListener('click', () => G.loadMap(b.dataset.map)); });
   const range = (id, key, fmt, after) => {
     const el = $(id);
@@ -635,6 +643,28 @@ function buildGfxRows() {
       else { el.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === String(v))); $(`${id}-v`).textContent = c.hint ? c.hint() : ''; }
     };
   }
+}
+
+// 무기고: 주무기·보조무기 선택
+function buildArmory() {
+  const mk = (boxId, list, key) => {
+    const box = $(boxId); box.innerHTML = '';
+    for (const id of list) {
+      const d = WEAPONS[id];
+      const b = document.createElement('button'); b.dataset.w = id;
+      b.innerHTML = `<span>${d.cls}</span>${d.name}`;
+      b.addEventListener('click', () => { settings[key] = id; saveSettings(); syncArmory(); });
+      box.appendChild(b);
+    }
+  };
+  mk('arm-primary', PRIMARIES, 'primary'); mk('arm-secondary', SECONDARIES, 'secondary');
+  syncArmory();
+}
+function syncArmory() {
+  const [p, s] = G.weapons.loadout();
+  document.querySelectorAll('#arm-primary button').forEach((b) => b.classList.toggle('on', b.dataset.w === p));
+  document.querySelectorAll('#arm-secondary button').forEach((b) => b.classList.toggle('on', b.dataset.w === s));
+  $('arm-now').textContent = `${WEAPONS[p].name} + ${WEAPONS[s].name}`;
 }
 
 function syncSettings() {
