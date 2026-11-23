@@ -92,8 +92,8 @@ export class World {
     if (this.A.daySky) { S.background = this.A.daySky; S.backgroundIntensity = 1.0; }
     else S.background = new THREE.Color(0x9fc3e6);
     S.fog = new THREE.FogExp2(new THREE.Color().setRGB(0.62, 0.7, 0.8, THREE.LinearSRGBColorSpace), 0.0032);
-    // 태양: HDRI 최대 밝기 픽셀에서 계산한 방향 (고도 31.8°)
-    this.sunDir = new THREE.Vector3(0.512, 0.527, 0.678).normalize();
+    // 태양: HDRI 최대 밝기 픽셀에서 계산한 방향 (assets/hdri/day_sky.json)
+    this.sunDir = new THREE.Vector3(...(this.A.daySun || [0.688, 0.264, 0.676])).normalize();
     this.sun = new THREE.DirectionalLight(0xfff0dc, 3.1);
     this.sun.castShadow = true;
     const sc = this.sun.shadow.camera; sc.left = -45; sc.right = 45; sc.top = 45; sc.bottom = -45; sc.near = 1; sc.far = 260;
@@ -144,7 +144,7 @@ export class World {
     if (s) {
       m = new THREE.MeshStandardMaterial({
         map: s.map, normalMap: s.normalMap,
-        roughnessMap: s.ormMap || s.roughMap, metalnessMap: s.ormMap || null, aoMap: s.ormMap || null, aoMapIntensity: 0.9,
+        roughnessMap: s.ormMap || s.roughMap, metalnessMap: s.ormMap || null, aoMap: s.aoMap, aoMapIntensity: 0.9,
         roughness: 1, metalness: s.ormMap ? 1 : 0, envMapIntensity: 0.8, ...extra,
       });
       ud = { ...ud, tw: ud.twAsset || ud.tw };

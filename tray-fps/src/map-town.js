@@ -26,7 +26,7 @@ export function buildTown(W) {
   seed = 1337;
   const set = (n, extra = {}, ud = {}) => {
     const s = A.set(n);
-    const m = s ? new THREE.MeshStandardMaterial({ map: s.map, normalMap: s.normalMap, roughnessMap: s.ormMap, metalnessMap: s.ormMap, aoMap: s.ormMap, roughness: 1, metalness: s.ormMap ? 1 : 0, ...extra })
+    const m = s ? new THREE.MeshStandardMaterial({ map: s.map, normalMap: s.normalMap, roughnessMap: s.ormMap, metalnessMap: s.ormMap, aoMap: s.aoMap, roughness: 1, metalness: s.ormMap ? 1 : 0, ...extra })
       : new THREE.MeshStandardMaterial({ color: extra.color || 0xd8d2c4, roughness: 0.9 });
     m.userData = { surface: 'concrete', tw: 3, ...ud };
     return m;

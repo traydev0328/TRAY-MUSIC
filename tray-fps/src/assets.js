@@ -91,18 +91,34 @@ export class Assets {
         this.tex[set][m] = t;
       }).catch((e) => { this.failed.push(`${set}/${m}`); console.warn('asset fail', set, m, e); }));
     }
-    jobs.push(tl.loadAsync(`${BASE}hdri/harbour_sky.jpg`).then((t) => { t.colorSpace = THREE.SRGBColorSpace; t.mapping = THREE.EquirectangularReflectionMapping; this.daySky = t; }).catch(() => this.failed.push('sky')));
-    jobs.push(tl.loadAsync(`${BASE}hdri/harbour_rgbm.png`).then((t) => { t.colorSpace = THREE.NoColorSpace; t.generateMipmaps = false; t.minFilter = THREE.LinearFilter; this.dayEnv = t; }).catch(() => this.failed.push('dayEnv')));
+    jobs.push(tl.loadAsync(`${BASE}hdri/day_sky.jpg`).then((t) => { t.colorSpace = THREE.SRGBColorSpace; t.mapping = THREE.EquirectangularReflectionMapping; this.daySky = t; }).catch(() => this.failed.push('sky')));
+    jobs.push(tl.loadAsync(`${BASE}hdri/day_rgbm.png`).then((t) => { t.colorSpace = THREE.NoColorSpace; t.generateMipmaps = false; t.minFilter = THREE.LinearFilter; this.dayEnv = t; }).catch(() => this.failed.push('dayEnv')));
+    // 태양 방향 (HDRI 최대 밝기 픽셀에서 미리 계산해 둔 값)
+    jobs.push(fetch(`${BASE}hdri/day_sky.json`).then((r) => r.json()).then((j) => { this.daySun = j.sun; }).catch(() => {}));
     await Promise.all(jobs);
     this._dayLoaded = true;
   }
 
   // 텍스처 세트 → MeshStandardMaterial 옵션
+  // ARM 의 R(AO) 채널이 거의 비어 있으면(일부 Poly Haven 텍스처) AO 로 쓰면 간접광이 꺼져 새까맣게 된다
+  aoUsable(tex) {
+    if (!tex || !tex.image) return false;
+    if (tex.userData.aoOk !== undefined) return tex.userData.aoOk;
+    try {
+      const c = document.createElement('canvas'); c.width = c.height = 16;
+      const x = c.getContext('2d'); x.drawImage(tex.image, 0, 0, 16, 16);
+      const d = x.getImageData(0, 0, 16, 16).data; let sum = 0;
+      for (let i = 0; i < d.length; i += 4) sum += d[i];
+      tex.userData.aoOk = sum / 256 > 40;
+    } catch (e) { tex.userData.aoOk = true; }
+    return tex.userData.aoOk;
+  }
+
   set(name) {
     const s = this.tex[name];
     // 컨테이너는 알베도를 캔버스로 재가공하므로 diff 없이 노멀만 있어도 유효
     if (!s || !s.nor || (!s.diff && name !== 'container_side')) return null;
-    return { map: s.diff || null, normalMap: s.nor, ormMap: s.arm || null, roughMap: s.rough || null };
+    return { aoMap: this.aoUsable(s.arm) ? s.arm : null, map: s.diff || null, normalMap: s.nor, ormMap: s.arm || null, roughMap: s.rough || null };
   }
 
   // 컨테이너 도색 변형: 원본(녹색) 이미지를 색조 회전 + 레이블/때 추가

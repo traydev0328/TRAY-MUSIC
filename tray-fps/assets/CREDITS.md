@@ -20,6 +20,8 @@
 | 텍스처 | concrete_slab_wall | 사무동 | — |
 | 텍스처 | container_side | 컨테이너(색상 변형 5종 런타임 생성) | — |
 | 텍스처 | corrugated_iron_02 | 창고 외벽 | — |
+| HDRI | furry_clouds (4K 사진 + 1K 조명) | 낮 맵 하늘 배경·환경광 | — |
+| 텍스처 | white_stucco · beige_wall_001 · plastered_stone_wall · clay_roof_tiles · cobblestone_floor_001 · blue_painted_planks | 지중해 마을 | — |
 | HDRI | rooftop_night (1K) | 환경 반사광(최대 밝기 제한 후 사용) | — |
 
 합계 약 9.7MB. 로드에 실패한 항목은 코드로 만든 절차적 대체물이 자동으로 쓰입니다.
