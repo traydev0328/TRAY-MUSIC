@@ -338,7 +338,7 @@ export class Weapons {
         if (G.net.isClient) G.net.sendHost({ t: 'hit', id: eh.enemy.id, d: Math.round(d.dmg * mul * 10) / 10, p: eh.part, dir: G.net.v3(dir) });
         else res = eh.enemy.takeDamage(d.dmg * mul, eh.part, dir, eh.point, G.net.active ? G.net.myId : 'local');
         hitAny = true; if (res.killed) killAny = true; if (eh.part === 'head' || eh.part === 'core') headAny = true;
-        G.effects.robotHit(eh.point, dir, eh.part === 'head');
+        if (eh.enemy.real) G.effects.playerHit(eh.point, dir); else G.effects.robotHit(eh.point, dir, eh.part === 'head');
       } else if (lvl) {
         end = origin.clone().addScaledVector(dir, lvl.t);
         G.effects.impact(end, lvl.normal, lvl.surface);

@@ -55,3 +55,9 @@
 | M40A3 Sniper Rifle | 3danalyst | https://sketchfab.com/3d-models/861c37a0373e4362b964ff526fc620c4 | M-40 볼트액션 저격총 |
 
 변경 사항: meshopt 무손실 압축, 텍스처 WebP(해상도 유지), 1인칭 자동 정렬(축·축척·손 위치·조준선). 게임 내 명칭은 실총 상표 대신 별도 표기.
+
+## 적군 병력 (Sketchfab, CC BY 4.0)
+
+| 모델 | 제작자 | 출처 | 사용처 |
+|---|---|---|---|
+| Military tactical suit (LowPolyGameReady) | 1799danly | https://sketchfab.com/3d-models/ef698ce36b1545a78ce592dd3db4c7ed | 적 무장 병력 (실사 AK 장착) |

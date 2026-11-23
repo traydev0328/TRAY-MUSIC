@@ -101,7 +101,7 @@ export class Assets {
   }
 
   // 실사 캐릭터·총기 (Sketchfab CC-BY, meshopt 무손실 압축 + WebP). 원본 씬과 애니메이션을 그대로 보관
-  async loadReal(ids = ['swat', 'fsb', 'm16']) {
+  async loadReal(ids = ['swat', 'fsb', 'm16', 'tac_suit', 'ar_ak47t']) {
     this.real = this.real || {};
     const gl = new GLTFLoader(); gl.setMeshoptDecoder(MeshoptDecoder);
     await Promise.all(ids.filter((id) => !this.real[id]).map((id) => gl.loadAsync(`${BASE}real/${id}/${id}.json`).then((g) => {

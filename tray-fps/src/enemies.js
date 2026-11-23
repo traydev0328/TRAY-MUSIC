@@ -5,10 +5,12 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import * as TX from './textures.js';
 import { buildOperator, buildRealOperator, animateReal } from './operator.js';
+import { buildRealViewmodel } from './realgun.js';
+import { GUNS } from './arsenal.js';
 
 export const TYPES = {
-  warden:  { hp: 110, speed: 3.1, dmg: 7,  burst: [3, 5], rof: 0.13, acc: 0.42, range: 34, score: 100, scale: 1,    name: '워든' },
-  heavy:   { hp: 420, speed: 2.0, dmg: 9,  burst: [6, 9], rof: 0.1,  acc: 0.34, range: 30, score: 300, scale: 1.24, name: '불워크' },
+  warden:  { hp: 110, speed: 3.1, dmg: 7,  burst: [3, 5], rof: 0.13, acc: 0.42, range: 34, score: 100, scale: 1,    name: '무장 병력' },
+  heavy:   { hp: 300, speed: 2.4, dmg: 9,  burst: [6, 9], rof: 0.1,  acc: 0.34, range: 30, score: 300, scale: 1.24, name: '적 특수부대' },
   drone:   { hp: 45,  speed: 6.5, dmg: 5,  burst: [3, 4], rof: 0.11, acc: 0.38, range: 28, score: 150, scale: 1,    name: '호넷' },
 };
 export const TYPE_KEYS = ['warden', 'heavy', 'drone'];
@@ -99,6 +101,14 @@ export class Enemy {
   get skin() { return 'android'; }
 
   build() {
+    // 실사 병력 (Sketchfab CC-BY): 일반 적 = 전술복 병사 + 실사 AK, 중장갑 = FSB 대원
+    const RA = this.G.assets && this.G.assets.real;
+    if (this.skin === 'android' && RA && RA.tac_suit && RA.fsb) {
+      buildRealOperator(this, this.type === 'heavy' ? 'fsb' : 'tac_suit');
+      this.visorMat.color.setRGB(2.2, 0.25, 0.15); // 적 식별 완장(붉은색)
+      if (this.type !== 'heavy') attachRifle(this);
+      return;
+    }
     const g = geos(), M = mats(), s = this.T.scale, heavy = this.type === 'heavy', op = this.skin === 'operator';
     const armor = op ? M.plate : heavy ? M.armorDark : M.armor;
     const limb = op ? M.fabric : armor;
@@ -174,6 +184,12 @@ export class Enemy {
     if (!this.alive && this._dead) return;
     this.alive = false; this._dead = true;
     const G = this.G;
+    if (this.real) { // 실사 병력: 피격 방향으로 쓰러진 뒤 사라짐
+      this.dieT = 0; this.dieDir = Math.atan2(dir.x, dir.z) - this.yaw;
+      G.effects.playerHit(this.aimPoint(), dir);
+      G.enemies.dying.push(this);
+      return;
+    }
     this.root.updateMatrixWorld(true);
     const meshes = [];
     this.root.traverse((o) => { if (o.isMesh) meshes.push(o); });
@@ -365,6 +381,12 @@ export class Enemy {
   }
 
   _animate(dt, target) {
+    if (this.real) {
+      const eye = this.eye, dy = target.y - eye.y, dh = Math.hypot(target.x - eye.x, target.z - eye.z);
+      animateReal(this, dt, Math.hypot(this.vel.x, this.vel.z), 0, this.canSee ? Math.atan2(dy, dh) : 0);
+      this.root.position.copy(this.pos); this.root.rotation.y = this.yaw;
+      return;
+    }
     const R = this.rig;
     const sp = Math.hypot(this.vel.x, this.vel.z);
     this.walkT += dt * sp * 2.6;
@@ -540,6 +562,20 @@ export class Operator extends Enemy {
   dispose() { this.root.removeFromParent(); }
 }
 
+// 무장하지 않은 실사 모델에 실사 AK 를 가슴 앞 조준 자세로 장착 (정렬된 원본을 한 번 만들어 복제)
+let RIFLE_TPL = null;
+function attachRifle(e) {
+  const G = e.G, src = G.assets.real.ar_ak47t;
+  if (!src) return;
+  if (!RIFLE_TPL) { const m = buildRealViewmodel(G.weapons, 'ar_ak47t', GUNS.ar_ak47t, src); RIFLE_TPL = { gun: m.gun, muzzleZ: m.muzzle.position.z }; }
+  const g = RIFLE_TPL.gun.clone(true);
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.raycast = () => {}; } if (o.isGroup && o.children.length && o.children[0].material && o.children[0].material.blending === THREE.AdditiveBlending) o.visible = false; });
+  g.rotation.y = Math.PI; // 1인칭 기준(-z 앞) → 캐릭터 기준(+z 앞)
+  g.position.set(0.1, 1.33, 0.22);
+  e.root.add(g);
+  e.rig.muzzle.position.set(0.1, 1.33, 0.22 - RIFLE_TPL.muzzleZ);
+}
+
 function makeTag(text) {
   const c = document.createElement('canvas'); c.width = 256; c.height = 64;
   const ctx = c.getContext('2d');
@@ -562,9 +598,12 @@ export class Enemies {
     this.maxTokens = 2;
     this.ray = new THREE.Raycaster();
     this.kills = 0; this.headshots = 0;
+    this.dying = [];
   }
 
   clear() {
+    for (const e of this.dying || []) e.root.removeFromParent();
+    this.dying = [];
     for (const e of this.list) { if (e.sound) e.sound.stop(); e.root.removeFromParent(); }
     this.list = []; this.byId.clear(); this.tokens.clear();
   }
@@ -664,6 +703,15 @@ export class Enemies {
 
   update(dt) {
     for (const e of this.list) if (e.alive) e.update(dt);
+    // 실사 병력 사망 연출: 0.6초에 걸쳐 쓰러지고 6초 뒤 땅으로 가라앉아 제거
+    for (let i = this.dying.length - 1; i >= 0; i--) {
+      const e = this.dying[i]; e.dieT += dt;
+      const k = Math.min(1, e.dieT / 0.6), f = k * k;
+      e.root.rotation.set(-Math.cos(e.dieDir) * 1.5 * f, e.yaw, Math.sin(e.dieDir) * 1.5 * f, 'YXZ');
+      e.root.position.y = e.pos.y + 0.12 * f - Math.max(0, e.dieT - 6) * 0.3;
+      if (e.real && e.real.mixer) e.real.mixer.update(dt * (1 - k));
+      if (e.dieT > 7.5) { e.root.removeFromParent(); this.dying.splice(i, 1); }
+    }
     if (this.list.length > 40) { this.list = this.list.filter((e) => e.alive); this.byId = new Map(this.list.map((e) => [e.id, e])); }
   }
 }
