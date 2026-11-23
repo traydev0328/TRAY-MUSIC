@@ -78,6 +78,25 @@ export class Assets {
     return { parts, box, size: box.getSize(new THREE.Vector3()) };
   }
 
+  // 낮 맵 전용 에셋 (필요할 때만 받기): 실사 하늘 사진 4K, 환경광 RGBM, 지중해 텍스처 6종
+  async loadDay() {
+    if (this._dayLoaded) return;
+    const tl = new THREE.TextureLoader();
+    const jobs = [];
+    for (const set of ['white_stucco', 'beige_wall_001', 'plastered_stone_wall', 'clay_roof_tiles', 'cobblestone_floor_001', 'blue_painted_planks']) {
+      this.tex[set] = {};
+      for (const m of ['diff', 'nor', 'arm']) jobs.push(tl.loadAsync(`${BASE}textures/${set}/${m}.jpg`).then((t) => {
+        t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = Math.min(8, this.maxAniso);
+        if (m === 'diff') t.colorSpace = THREE.SRGBColorSpace;
+        this.tex[set][m] = t;
+      }).catch((e) => { this.failed.push(`${set}/${m}`); console.warn('asset fail', set, m, e); }));
+    }
+    jobs.push(tl.loadAsync(`${BASE}hdri/harbour_sky.jpg`).then((t) => { t.colorSpace = THREE.SRGBColorSpace; t.mapping = THREE.EquirectangularReflectionMapping; this.daySky = t; }).catch(() => this.failed.push('sky')));
+    jobs.push(tl.loadAsync(`${BASE}hdri/harbour_rgbm.png`).then((t) => { t.colorSpace = THREE.NoColorSpace; t.generateMipmaps = false; t.minFilter = THREE.LinearFilter; this.dayEnv = t; }).catch(() => this.failed.push('dayEnv')));
+    await Promise.all(jobs);
+    this._dayLoaded = true;
+  }
+
   // 텍스처 세트 → MeshStandardMaterial 옵션
   set(name) {
     const s = this.tex[name];
@@ -128,17 +147,20 @@ export class Assets {
   }
 
   // RGBM PNG(rgb × a × 3)를 구 안쪽에 그려 PMREM 환경광으로 굽는다
-  envFromHDR() {
-    if (!this.hdr) return null;
+  envFromHDR() { return this.envFromRGBM(this.hdr); }
+
+  envFromRGBM(tex) {
+    if (!tex) return null;
     const scene = new THREE.Scene();
     const mat = new THREE.ShaderMaterial({
       side: THREE.BackSide, depthWrite: false,
-      uniforms: { map: { value: this.hdr } },
+      uniforms: { map: { value: tex } },
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
       fragmentShader: 'uniform sampler2D map; varying vec2 vUv; void main(){ vec4 t = texture2D(map, vUv); gl_FragColor = vec4(t.rgb * t.a * 3.0, 1.0); }',
     });
     const sphere = new THREE.Mesh(new THREE.SphereGeometry(10, 64, 32), mat);
     sphere.scale.x = -1; // 안쪽에서 볼 때 좌우가 뒤집히지 않도록
+    sphere.rotation.y = Math.PI; // three.js 등장방형 규약(scene.background)과 방향 일치
     scene.add(sphere);
     const pm = new THREE.PMREMGenerator(this.renderer);
     const rt = pm.fromScene(scene, 0.01);

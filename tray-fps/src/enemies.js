@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import * as TX from './textures.js';
+import { buildOperator } from './operator.js';
 
 export const TYPES = {
   warden:  { hp: 110, speed: 3.1, dmg: 7,  burst: [3, 5], rof: 0.13, acc: 0.42, range: 34, score: 100, scale: 1,    name: '워든' },
@@ -487,6 +488,7 @@ export class Drone extends Enemy {
 // 멀티플레이 아군 대원 아바타 (같은 리그, 전술복 재질)
 export class Operator extends Enemy {
   get skin() { return 'operator'; }
+  build() { buildOperator(this); } // 사실적 전술 대원 모델 (operator.js)
   constructor(G, pos, name) {
     super(G, 'warden', pos, { puppet: true });
     this.root.userData.enemy = null; // 사격 판정 대상 아님

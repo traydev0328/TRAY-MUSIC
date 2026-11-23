@@ -182,6 +182,11 @@ input[type=range] { width: 150px; accent-color: var(--amber); }
 .go-team { display: grid; gap: 4px; font-size: 13px; }
 .go-team div { display: flex; justify-content: space-between; border-bottom: 1px solid var(--ink-faint); padding: 4px 0; }
 .go-team b { font-family: var(--f-display); color: var(--amber); font-weight: 600; }
+.map-pick { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--ink-dim); }
+.gfx-box { border-top: 1px solid var(--ink-faint); padding-top: 10px; }
+.gfx-box summary { cursor: pointer; font-size: 13px; color: var(--ink-dim); margin-bottom: 8px; }
+.gfx-rows { display: grid; gap: 12px; }
+.panel .seg { flex-wrap: wrap; }
 .go-team em, .lobby-list em { font-style: normal; font-size: 11px; color: var(--ink-dim); margin-left: 6px; }
 .lobby-list li.t0 { border-left-color: #5fb8ff; } .lobby-list li.t1 { border-left-color: #ff8a4a; }
 #mode-line b { color: var(--ink); } #mode-line b.mine { color: var(--amber); }
@@ -263,6 +268,9 @@ input[type=range] { width: 150px; accent-color: var(--amber); }
       <button class="btn" id="btn-multi">멀티 협동</button>
       <button class="btn" id="btn-settings">설정</button>
     </div>
+    <div class="map-pick"><span>전장</span>
+      <div class="seg" id="seg-map"><button data-map="town">지중해 마을 · 낮</button><button data-map="port">제7 항만 · 비 내리는 밤</button></div>
+    </div>
     <div class="meta-row">
       <div>최고 점수<b id="best-score">0</b></div>
       <div>최고 웨이브<b id="best-wave">0</b></div>
@@ -288,7 +296,8 @@ input[type=range] { width: 150px; accent-color: var(--amber); }
 <section id="settings" class="screen dim" hidden>
   <div class="panel">
     <h3>설정</h3>
-    <div class="row"><div>그래픽 품질<span class="hint">울트라는 GTAO 주변광 차폐 추가 · 동적 해상도가 프레임을 지킵니다</span></div><div class="seg" id="seg-quality"></div></div>
+    <div class="row"><div>그래픽 프리셋<span class="hint" id="q-custom-note" hidden>항목을 직접 바꿔 '사용자 지정' 상태입니다</span></div><div class="seg" id="seg-quality"></div></div>
+    <details class="gfx-box" open><summary>세부 그래픽 설정</summary><div id="gfx-rows" class="gfx-rows"></div></details>
     <div class="row"><label for="s-sens">시점 감도 <span class="hint" id="s-sens-v">1.00</span></label><input type="range" id="s-sens" min="0.2" max="3" step="0.05"></div>
     <div class="row"><label for="s-fov">시야각(FOV) <span class="hint" id="s-fov-v">78°</span></label><input type="range" id="s-fov" min="65" max="100" step="1"></div>
     <div class="row"><label for="s-vol">음량 <span class="hint" id="s-vol-v">80%</span></label><input type="range" id="s-vol" min="0" max="1" step="0.05"></div>

@@ -55,10 +55,17 @@ export class Weapons {
 
   _lights() {
     const S = this.vmScene;
-    S.add(new THREE.HemisphereLight(0x9aaac4, 0x2a2420, 1.0));
-    const key = new THREE.DirectionalLight(0xffb27a, 1.4); key.position.set(-1, 1.2, 0.6); S.add(key);
-    const rim = new THREE.DirectionalLight(0x9fb8ff, 0.9); rim.position.set(1, 0.4, -1); S.add(rim);
+    this.vmHemi = new THREE.HemisphereLight(0x9aaac4, 0x2a2420, 1.0); S.add(this.vmHemi);
+    const key = this.vmKey = new THREE.DirectionalLight(0xffb27a, 1.4); key.position.set(-1, 1.2, 0.6); S.add(key);
+    const rim = this.vmRim = new THREE.DirectionalLight(0x9fb8ff, 0.9); rim.position.set(1, 0.4, -1); S.add(rim);
     this.vmFlash = new THREE.PointLight(0xffaa55, 0, 1.5, 2); S.add(this.vmFlash);
+  }
+
+  // 낮 맵: 강한 햇빛 + 밝은 하늘광 / 밤 맵: 따뜻한 가로등 + 차가운 림
+  setDay(day) {
+    this.vmHemi.color.set(day ? 0xdbe8ff : 0x9aaac4); this.vmHemi.groundColor.set(day ? 0x8c7a62 : 0x2a2420); this.vmHemi.intensity = day ? 1.3 : 1.0;
+    this.vmKey.color.set(day ? 0xfff0dc : 0xffb27a); this.vmKey.intensity = day ? 3.0 : 1.4;
+    this.vmRim.color.set(day ? 0xcfe2ff : 0x9fb8ff); this.vmRim.intensity = day ? 0.6 : 0.9;
   }
 
   _materials() {

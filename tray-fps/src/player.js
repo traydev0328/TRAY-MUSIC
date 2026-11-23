@@ -107,8 +107,9 @@ export class Player {
     this.pos.x += this.vel.x * dt; this.pos.z += this.vel.z * dt;
     for (let it = 0; it < 2; it++) W.collideCircle(this.pos, R, this.pos.y + (this.grounded ? STEP : 0.05), this.pos.y + this.height);
     // 맵 경계
-    this.pos.x = Math.max(-59.4, Math.min(59.4, this.pos.x));
-    this.pos.z = Math.max(-59.2, Math.min(59.4, this.pos.z));
+    const lim = G.world.H - 0.6;
+    this.pos.x = Math.max(-lim, Math.min(lim, this.pos.x));
+    this.pos.z = Math.max(-lim + 0.2, Math.min(lim, this.pos.z));
 
     // 수직
     this.vel.y -= 21 * dt;

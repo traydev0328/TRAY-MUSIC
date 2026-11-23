@@ -1,6 +1,6 @@
 // TRAY BLACK RAIN — 부트스트랩, 게임 루프, 웨이브, 픽업, HUD, 메뉴, 멀티플레이 흐름
 import * as THREE from 'three';
-import { PRESETS, settings, loadSettings, saveSettings, loadBest, saveBest, IS_TOUCH } from './config.js';
+import { GFX_PRESETS, SHADOW_LEVELS, presetGfx, settings, loadSettings, saveSettings, loadBest, saveBest, IS_TOUCH } from './config.js';
 import { AudioEngine } from './audio.js';
 import { Input } from './input.js';
 import { Assets } from './assets.js';
@@ -265,7 +265,7 @@ window.addEventListener('unhandledrejection', (e) => { if (G.state === 'loading'
 
 async function boot() {
   loadSettings();
-  G.preset = PRESETS[settings.quality];
+  G.preset = gfxPreset();
   progress(0.01, 'WebGL 렌더러 생성');
   const renderer = G.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance', stencil: false });
   if (!renderer.capabilities.isWebGL2) throw new Error('WebGL2 미지원 기기');
@@ -290,7 +290,7 @@ async function boot() {
   await G.assets.loadAll((p, label) => progress(0.02 + p * 0.5, label ? `실사 에셋 받는 중 · ${label}` : null));
   if (G.assets.failed.length) console.warn('일부 에셋 대체:', G.assets.failed);
 
-  G.world = new World(G, G.assets);
+  G.world = new World(G, G.assets, settings.map);
   await G.world.build((p, l) => progress(0.52 + p * 0.38, l));
   progress(0.92, '무기와 적 모델 준비');
   await new Promise((r) => setTimeout(r, 0));
@@ -313,7 +313,8 @@ async function boot() {
   renderer.compile(G.weapons.vmScene, G.weapons.vmCam);
   G.enemies.clear(); G.pickups.clear();
 
-  applyQuality(true);
+  G.weapons.setDay(!!G.world.day);
+  applyGraphics(true);
   onResize();
   window.addEventListener('resize', onResize);
   window.addEventListener('orientationchange', () => setTimeout(onResize, 200));
@@ -334,25 +335,61 @@ async function boot() {
 
 // ───────────── 품질/해상도 ─────────────
 let dynScale = 1, frameAvg = 16, dynTimer = 0;
-function pixelRatio() { return Math.max(0.5, Math.min(window.devicePixelRatio || 1, G.preset.maxPR) * (settings.dynRes ? dynScale : 1)); }
-function applyQuality(first) {
-  G.preset = PRESETS[settings.quality];
+function gfxPreset() {
+  const g = settings.gfx, sl = SHADOW_LEVELS[g.shadows] || SHADOW_LEVELS[2];
+  return { shadows: g.shadows > 0, shadowSize: sl.size || 1024, wide: !!sl.wide, rain: Math.round(5200 * g.rain), cloudOct: 2 + Math.round(g.viewDist * 2), lamps: g.lamps, maxPR: g.renderScale };
+}
+function pixelRatio() { return Math.max(0.5, Math.min(window.devicePixelRatio || 1, settings.gfx.renderScale) * (settings.dynRes ? dynScale : 1)); }
+// 그래픽 설정 전체 적용
+function applyGraphics(first) {
+  const g = settings.gfx, r = G.renderer;
+  G.preset = gfxPreset();
+  r.shadowMap.type = g.shadows >= 2 ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
   G.world.applyQuality(G.preset);
-  G.post.apply(G.preset);
+  const sc = G.world.sun.shadow.camera, span = G.preset.wide ? 70 : (G.world.day ? 45 : 38);
+  sc.left = -span; sc.right = span; sc.top = span; sc.bottom = -span; sc.updateProjectionMatrix();
+  G.post.apply(g, G.world.bloomCfg);
+  if (G.scene.fog) { if (G.world.fogBase === undefined) G.world.fogBase = G.scene.fog.density; G.scene.fog.density = G.world.fogBase / g.viewDist; }
+  G.camera.far = Math.max(1000, 1200 * g.viewDist); G.camera.updateProjectionMatrix();
+  const an = Math.min(g.aniso, r.capabilities.getMaxAnisotropy()), seen = new Set();
+  const touch = (o) => { for (const m of [].concat(o.material || [])) for (const k of ['map', 'normalMap', 'roughnessMap']) { const t = m[k]; if (t && !seen.has(t)) { seen.add(t); if (t.anisotropy !== an) { t.anisotropy = an; t.needsUpdate = true; } } } };
+  G.scene.traverse(touch); G.weapons.vmScene.traverse(touch);
   dynScale = 1;
   if (!first) onResize();
-  $('menu-quality').textContent = G.preset.name;
+  $('menu-quality').textContent = settings.quality === 'custom' ? '사용자 지정' : GFX_PRESETS[settings.quality].name;
 }
+
+// 맵 교체 (메뉴에서 선택하거나 멀티 시작 시 방장의 맵으로)
+const MAP_NAMES = { town: '지중해 마을 · 낮', port: '제7 항만 · 비 내리는 밤' };
+G.loadMap = async (id) => {
+  if (G.world && G.world.mapId === id) return;
+  settings.map = id; saveSettings();
+  $('loading').hidden = false; $('load-err').textContent = '';
+  progress(0.02, `${MAP_NAMES[id]} 불러오는 중`);
+  G.enemies.clear(); G.pickups.clear(); G.combat.reset();
+  G.world.dispose();
+  G.world = new World(G, G.assets, id);
+  await G.world.build(progress);
+  G.weapons.setDay(!!G.world.day);
+  G.weapons.vmScene.environment = G.scene.environment;
+  G.world.fogBase = undefined;
+  applyGraphics(true); onResize();
+  G.renderer.compile(G.scene, G.camera);
+  G.player.spawn(G.world.playerSpawn, 0);
+  $('loading').hidden = true;
+  document.querySelectorAll('#seg-map button').forEach((b) => b.classList.toggle('on', b.dataset.map === id));
+};
+
 function onResize() {
   const w = innerWidth, h = innerHeight;
   G.renderer.setPixelRatio(pixelRatio());
   G.renderer.setSize(w, h, false);
   G.camera.aspect = w / h; G.camera.updateProjectionMatrix();
-  G.weapons.vmCam.aspect = w / h; G.weapons.vmCam.fov = w < h ? 68 : 54; G.weapons.vmCam.updateProjectionMatrix();
+  G.weapons.vmCam.aspect = w / h; G.weapons.vmCam.fov = settings.vmFov + (w < h ? 14 : 0); G.weapons.vmCam.updateProjectionMatrix();
   G.post.resize();
   const pxScale = h * G.renderer.getPixelRatio() / (2 * Math.tan(THREE.MathUtils.degToRad(G.camera.fov / 2)));
   G.effects.setPixelScale(pxScale);
-  G.world.splash.material.uniforms.uPx.value = pxScale;
+  if (G.world.splash) G.world.splash.material.uniforms.uPx.value = pxScale;
   checkOrientation();
 }
 
@@ -490,7 +527,8 @@ G.matchEnd = (res) => {
 };
 
 // 참가자: 방장이 시작 신호를 보냄
-G.netStart = (m) => {
+G.netStart = async (m) => {
+  if (m.map && m.map !== G.world.mapId) await G.loadMap(m.map);
   hideScreens();
   G.match.reset(m.mode || 'coop', m.teams);
   startGame(typeof m.idx === 'number' ? m.idx : Math.max(0, G.net.players.findIndex((p) => p.id === G.net.myId)));
@@ -525,11 +563,13 @@ function setupMenus() {
   tap('btn-rotate-skip', () => { G.rotateSkip = true; checkOrientation(); });
 
   const seg = $('seg-quality');
-  for (const k of Object.keys(PRESETS)) {
-    const b = document.createElement('button'); b.textContent = PRESETS[k].name; b.dataset.q = k; b.id = `q-${k}`;
-    b.addEventListener('click', () => { settings.quality = k; applyQuality(false); syncSettings(); });
+  for (const k of Object.keys(GFX_PRESETS)) {
+    const b = document.createElement('button'); b.textContent = GFX_PRESETS[k].name; b.dataset.q = k; b.id = `q-${k}`;
+    b.addEventListener('click', () => { settings.quality = k; settings.gfx = presetGfx(k); applyGraphics(false); syncSettings(); });
     seg.appendChild(b);
   }
+  buildGfxRows();
+  document.querySelectorAll('#seg-map button').forEach((b) => { b.classList.toggle('on', b.dataset.map === settings.map); b.addEventListener('click', () => G.loadMap(b.dataset.map)); });
   const range = (id, key, fmt, after) => {
     const el = $(id);
     el.addEventListener('input', () => { settings[key] = parseFloat(el.value); $(`${id}-v`).textContent = fmt(settings[key]); if (after) after(); });
@@ -544,8 +584,61 @@ function setupMenus() {
   $('fps').hidden = !settings.showFps;
 }
 
+// 항목별 그래픽 설정 UI (데이터로 생성)
+const GFX_UI = [
+  { k: 'renderScale', label: '렌더 해상도 배율', type: 'range', min: 0.5, max: 2.5, step: 0.25, fmt: (v) => `${v.toFixed(2)}x (기기 ${(window.devicePixelRatio || 1).toFixed(2)}x)` },
+  { k: 'shadows', label: '그림자 품질', type: 'seg', opts: SHADOW_LEVELS.map((l, i) => [i, l.name]) },
+  { k: 'aa', label: '안티앨리어싱', hint: () => 'MSAA 4x 는 선명하지만 무겁습니다', type: 'seg', opts: [['off', '끔'], ['fxaa', 'FXAA'], ['msaa', 'MSAA 4x']] },
+  { k: 'aniso', label: '텍스처 필터링', hint: () => '비스듬한 바닥·벽의 선명도', type: 'seg', opts: [[2, '2x'], [4, '4x'], [8, '8x'], [16, '16x']] },
+  { k: 'viewDist', label: '시야 거리 / 대기 안개', type: 'range', min: 0.5, max: 1.5, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
+  { k: 'ao', label: '주변광 차폐(GTAO)', hint: () => '구석·접지면 그림자 · 매우 무거움', type: 'tog' },
+  { k: 'bloom', label: '빛 번짐(블룸)', type: 'tog' },
+  { k: 'lamps', label: '야간 가로등 조명', type: 'tog' },
+  { k: 'rain', label: '빗줄기 밀도 (야간 맵)', type: 'range', min: 0, max: 1, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
+  { k: 'grain', label: '필름 그레인', type: 'tog' },
+  { k: 'ca', label: '색수차', type: 'tog' },
+  { k: 'vignette', label: '비네트', type: 'tog' },
+  { k: 'fpsCap', label: '프레임 제한', hint: () => '배터리·발열 절약', type: 'seg', opts: [[30, '30'], [60, '60'], [0, '무제한']], top: true },
+  { k: 'vmFov', label: '총기 시야각', type: 'range', min: 45, max: 70, step: 1, fmt: (v) => `${v}°`, top: true },
+];
+function buildGfxRows() {
+  const box = $('gfx-rows'); box.innerHTML = '';
+  for (const c of GFX_UI) {
+    const row = document.createElement('div'); row.className = 'row';
+    const id = `g-${c.k}`;
+    const lab = document.createElement('label'); lab.htmlFor = id; lab.innerHTML = `${c.label}<span class="hint" id="${id}-v"></span>`;
+    row.appendChild(lab);
+    const get = () => (c.top ? settings[c.k] : settings.gfx[c.k]);
+    const setv = (v) => {
+      if (c.top) settings[c.k] = v; else { settings.gfx[c.k] = v; settings.quality = 'custom'; }
+      applyGraphics(false); syncSettings();
+    };
+    let el;
+    if (c.type === 'range') {
+      el = document.createElement('input'); el.type = 'range'; el.min = c.min; el.max = c.max; el.step = c.step;
+      el.addEventListener('change', () => setv(parseFloat(el.value)));
+      el.addEventListener('input', () => { $(`${id}-v`).textContent = c.fmt(parseFloat(el.value)); });
+    } else if (c.type === 'tog') {
+      el = document.createElement('button'); el.className = 'tog'; el.setAttribute('aria-label', c.label);
+      el.addEventListener('click', () => setv(!get()));
+    } else {
+      el = document.createElement('div'); el.className = 'seg';
+      for (const [v, n] of c.opts) { const b = document.createElement('button'); b.textContent = n; b.dataset.v = String(v); b.addEventListener('click', () => setv(v)); el.appendChild(b); }
+    }
+    el.id = id; row.appendChild(el); box.appendChild(row);
+    c.sync = () => {
+      const v = get();
+      if (c.type === 'range') { el.value = v; $(`${id}-v`).textContent = c.fmt(v); }
+      else if (c.type === 'tog') { el.classList.toggle('on', !!v); $(`${id}-v`).textContent = c.hint ? c.hint() : ''; }
+      else { el.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === String(v))); $(`${id}-v`).textContent = c.hint ? c.hint() : ''; }
+    };
+  }
+}
+
 function syncSettings() {
   document.querySelectorAll('#seg-quality button').forEach((b) => b.classList.toggle('on', b.dataset.q === settings.quality));
+  $('q-custom-note').hidden = settings.quality !== 'custom';
+  for (const c of GFX_UI) if (c.sync) c.sync();
   $('s-sens').value = settings.sens; $('s-sens-v').textContent = settings.sens.toFixed(2);
   $('s-fov').value = settings.fov; $('s-fov-v').textContent = `${settings.fov}°`;
   $('s-vol').value = settings.volume; $('s-vol-v').textContent = `${Math.round(settings.volume * 100)}%`;
@@ -633,6 +726,7 @@ function spectateCam(dt) {
 
 function frame(now) {
   requestAnimationFrame(frame);
+  if (settings.fpsCap && now - last < 1000 / settings.fpsCap - 2) return; // 프레임 제한
   const raw = (now - last) / 1000; last = now;
   const dt = Math.min(raw, 1 / 20);
   G.time += dt;
@@ -655,8 +749,9 @@ function frame(now) {
   } else if (G.state === 'menu') {
     menuCam.t += dt;
     const t = menuCam.t * 0.05;
-    G.camera.position.set(-6 + Math.sin(t) * 3, 2.1 + Math.sin(t * 1.7) * 0.2, 31 + Math.cos(t) * 1.5);
-    G.camera.rotation.set(0.02 + Math.sin(t * 0.8) * 0.02, 0.38 + Math.sin(t * 1.1) * 0.12, 0);
+    const mc = G.world.menuCam || { x: -6, y: 2.1, z: 31, yaw: 0.38, pitch: 0.02 };
+    G.camera.position.set(mc.x + Math.sin(t) * 3, mc.y + Math.sin(t * 1.7) * 0.2, mc.z + Math.cos(t) * 1.5);
+    G.camera.rotation.set(mc.pitch + Math.sin(t * 0.8) * 0.02, mc.yaw + Math.sin(t * 1.1) * 0.12, 0);
     if (Math.abs(G.camera.fov - 62) > 0.1) { G.camera.fov = 62; G.camera.updateProjectionMatrix(); }
   }
   if (G.state === 'playing' && G.player.alive && Math.abs(G.camera.fov - G.player.fovCur) > 0.01) { G.camera.fov = G.player.fovCur; G.camera.updateProjectionMatrix(); }

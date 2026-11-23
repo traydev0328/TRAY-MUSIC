@@ -214,7 +214,7 @@ export class Net {
     this.teams.set(id, this.teams.get(id) === 1 ? 0 : 1); this._lobby();
     if (this.G.state === 'playing') { this.G.match.teams = new Map(this.teams); this.broadcast({ t: 'teams', teams: [...this.teams] }); }
   }
-  startMsg(idx) { return { t: 'start', idx, mode: this.lobbyMode, teams: [...this.teams] }; }
+  startMsg(idx) { return { t: 'start', idx, mode: this.lobbyMode, teams: [...this.teams], map: this.G.world.mapId }; }
 
   _fromClient(pid, m) {
     const G = this.G, P = this.peers.get(pid);

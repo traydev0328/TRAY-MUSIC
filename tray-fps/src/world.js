@@ -3,16 +3,20 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import * as TX from './textures.js';
+import { buildTown } from './map-town.js';
 
-const HALF = 60;           // 맵 반경(m)
 const GRID = 1;            // 길찾기 격자 셀 크기(m)
-const GN = (HALF * 2) / GRID;
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 export class World {
-  constructor(G, assets) {
+  constructor(G, assets, mapId = 'port') {
     this.G = G;
+    this.mapId = mapId;
+    this.H = mapId === 'town' ? 75 : 60;   // 맵 반경(m)
+    this.GN = (this.H * 2) / GRID;
+    this.root = new THREE.Group();
+    G.scene.add(this.root);
     this.A = assets;            // 실사 에셋 (없으면 절차적 대체)
     this.scene = G.scene;
     this.colliders = [];
@@ -32,6 +36,7 @@ export class World {
 
   // ---------------- 빌드 ----------------
   async build(progress) {
+    if (this.mapId === 'town') return this._buildDay(progress, buildTown);
     const step = async (p, label) => { progress(p, label); await tick(); };
     const A = this.A;
     await step(0.05, '콘크리트 표면 준비');
@@ -72,6 +77,48 @@ export class World {
     this._spawns();
     await step(0.9, '환경 반사광 생성');
     this._environment();
+  }
+
+  // ── 낮 맵 공통 빌드: 실사 하늘 사진 배경 + 사진 속 태양 방향과 일치하는 햇빛 + HDRI 환경광 ──
+  async _buildDay(progress, layoutFn) {
+    const step = async (p, label) => { progress(p, label); await tick(); };
+    this.day = true;
+    await step(0.05, '낮 하늘·실사 텍스처 받는 중');
+    await this.A.loadDay();
+    await step(0.3, '재질 준비');
+    this.tex = { crate: TX.crateWood(51), micro: TX.microDetail(61), barrier: TX.concrete(23, { base: 0.5 }), water: TX.waterNormal(71), paint: TX.wornPaint(81) };
+    // 하늘: 4K 실사 사진(등장방형). 톤매핑 후 사진 밝기가 유지되도록 배경 밝기 보정
+    const S = this.scene;
+    if (this.A.daySky) { S.background = this.A.daySky; S.backgroundIntensity = 1.0; }
+    else S.background = new THREE.Color(0x9fc3e6);
+    S.fog = new THREE.FogExp2(new THREE.Color().setRGB(0.62, 0.7, 0.8, THREE.LinearSRGBColorSpace), 0.0032);
+    // 태양: HDRI 최대 밝기 픽셀에서 계산한 방향 (고도 31.8°)
+    this.sunDir = new THREE.Vector3(0.512, 0.527, 0.678).normalize();
+    this.sun = new THREE.DirectionalLight(0xfff0dc, 3.1);
+    this.sun.castShadow = true;
+    const sc = this.sun.shadow.camera; sc.left = -45; sc.right = 45; sc.top = 45; sc.bottom = -45; sc.near = 1; sc.far = 260;
+    this.sun.shadow.bias = -0.0003; this.sun.shadow.normalBias = 0.04; this.sun.shadow.mapSize.set(2048, 2048);
+    this.root.add(this.sun); this.root.add(this.sun.target);
+    this.hemi = new THREE.HemisphereLight(0xcfe0ff, 0x8f7c66, 0.35); this.root.add(this.hemi);
+    await step(0.45, '마을 건설');
+    layoutFn(this);
+    await step(0.7, '정적 메시 병합');
+    this._mergeStatic();
+    this._finalizeProps();
+    await step(0.85, '길찾기 격자 계산');
+    this._buildNavGrid();
+    if (this._pendingSpawns) this._pendingSpawns();
+    await step(0.92, '환경광 생성');
+    const env = this.A.envFromRGBM(this.A.dayEnv);
+    if (env) S.environment = env;
+    this.bloomCfg = { strength: 0.22, radius: 0.4, threshold: 1.25 };
+  }
+
+  dispose() {
+    this.root.removeFromParent();
+    this.root.traverse((o) => { if (o.isMesh && !o.isInstancedMesh && o.geometry) o.geometry.dispose(); });
+    for (const t of Object.values(this.tex || {})) { if (t && t.isTexture) t.dispose(); else if (t && typeof t === 'object') for (const v of Object.values(t)) if (v && v.isTexture) v.dispose(); }
+    this.scene.background = null; this.scene.fog = null; this.scene.environment = null;
   }
 
   _std(tex, opts = {}) {
@@ -198,7 +245,7 @@ export class World {
       const mesh = new THREE.Mesh(merged, mat);
       mesh.castShadow = cast; mesh.receiveShadow = true;
       mesh.matrixAutoUpdate = false; mesh.updateMatrix();
-      this.scene.add(mesh);
+      this.root.add(mesh);
       this.staticMeshes.push(mesh);
     }
     this.buckets.clear();
@@ -250,7 +297,7 @@ export class World {
     this.sky = new THREE.Mesh(new THREE.SphereGeometry(900, 32, 16), this.skyMat);
     this.sky.frustumCulled = false;
     this.sky.renderOrder = -10;
-    this.scene.add(this.sky);
+    this.root.add(this.sky);
     const fogC = new THREE.Color().setRGB(0.062, 0.058, 0.06, THREE.LinearSRGBColorSpace);
     this.scene.fog = new THREE.FogExp2(fogC, 0.0135);
     this.scene.background = null;
@@ -308,7 +355,7 @@ export class World {
       this.sun.shadow.mapSize.set(q.shadowSize, q.shadowSize);
       if (this.sun.shadow.map) { this.sun.shadow.map.dispose(); this.sun.shadow.map = null; }
     }
-    this.skyMat.uniforms.uOct.value = q.cloudOct;
+    if (this.skyMat) this.skyMat.uniforms.uOct.value = q.cloudOct;
     if (this.rainMesh) this.rainMesh.geometry.setDrawRange(0, q.rain * 2);
     for (const l of this.lamps) if (l.light) l.light.visible = q.lamps;
     this.scene.traverse((o) => { if (o.material) [].concat(o.material).forEach((m) => { m.needsUpdate = true; }); });
@@ -373,7 +420,7 @@ export class World {
     const mesh = new THREE.Mesh(g, mat);
     mesh.receiveShadow = true;
     mesh.matrixAutoUpdate = false; mesh.updateMatrix();
-    this.scene.add(mesh);
+    this.root.add(mesh);
     this.groundMesh = mesh;
 
     // 바다(북쪽 부두 너머)
@@ -381,13 +428,13 @@ export class World {
     const wm = new THREE.MeshStandardMaterial({ color: 0x05080b, roughness: 0.05, metalness: 0.1, normalMap: T.water, normalScale: new THREE.Vector2(0.35, 0.35) });
     T.water.repeat.set(60, 30);
     const water = new THREE.Mesh(wg, wm); water.position.set(0, -2.2, -60 - 200);
-    this.scene.add(water); this.water = water;
+    this.root.add(water); this.water = water;
 
     // 도로 도색
     const strip = (x, z, w, l, mat, rot = 0) => {
       const p = new THREE.Mesh(new THREE.PlaneGeometry(w, l), mat);
       p.rotation.x = -Math.PI / 2; p.rotation.z = rot; p.position.set(x, 0.012, z); p.receiveShadow = true;
-      this.scene.add(p);
+      this.root.add(p);
     };
     const PY = this.mat.paintY, PW = this.mat.paintW;
     strip(-12, 15, 0.15, 80, PY); strip(-11.7, 15, 0.15, 80, PY);
@@ -402,15 +449,15 @@ export class World {
     const B = (...a) => this.box(...a);
 
     // 외곽 담장 (남/동/서) — 높이 5m, 이음선 있는 콘크리트 패널
-    B(0, 0, HALF + 0.4, HALF * 2 + 1.6, 5, 0.8, M.wall);
-    B(HALF + 0.4, 0, 0, 0.8, 5, HALF * 2, M.wall);
-    B(-HALF - 0.4, 0, 0, 0.8, 5, HALF * 2, M.wall);
+    B(0, 0, this.H + 0.4, this.H * 2 + 1.6, 5, 0.8, M.wall);
+    B(this.H + 0.4, 0, 0, 0.8, 5, this.H * 2, M.wall);
+    B(-this.H - 0.4, 0, 0, 0.8, 5, this.H * 2, M.wall);
     // 북쪽 부두: 낮은 방호벽 + 보이지 않는 추락 방지 벽
-    if (this.A.models.concrete_road_barrier) for (let x = -HALF + 1; x < HALF; x += 1.56) this.prop('concrete_road_barrier', x, 0, -HALF + 0.5, 0, 1, { group: 'quay', cast: false, surface: 'concrete' });
-    else for (let x = -HALF + 1; x < HALF; x += 2.05) this._jersey(x, -HALF + 0.5, 0);
-    this.collider(-HALF, 0, -HALF - 1, HALF, 6, -HALF + 0.2, 'invisible');
+    if (this.A.models.concrete_road_barrier) for (let x = -this.H + 1; x < this.H; x += 1.56) this.prop('concrete_road_barrier', x, 0, -this.H + 0.5, 0, 1, { group: 'quay', cast: false, surface: 'concrete' });
+    else for (let x = -this.H + 1; x < this.H; x += 2.05) this._jersey(x, -this.H + 0.5, 0);
+    this.collider(-this.H, 0, -this.H - 1, this.H, 6, -this.H + 0.2, 'invisible');
     // 부두 가장자리 콘크리트
-    B(0, -2.2, -HALF - 1.5, HALF * 2, 2.2, 3, M.barrier, { collide: false });
+    B(0, -2.2, -this.H - 1.5, this.H * 2, 2.2, 3, M.barrier, { collide: false });
 
     // ── 창고 (진입 가능) ──
     this._warehouse(-30, -18, 26, 18, 8.5);
@@ -525,7 +572,7 @@ export class World {
         inst.instanceMatrix.needsUpdate = true;
         inst.computeBoundingSphere();
         inst.name = key;
-        this.scene.add(inst);
+        this.root.add(inst);
       }
     }
   }
@@ -580,11 +627,11 @@ export class World {
     const ly = 3.32 * S;
     const light = new THREE.PointLight(0xff9340, 42, 22, 2);
     light.position.set(x, ly - 0.15, z);
-    this.scene.add(light);
+    this.root.add(light);
     const cone = new THREE.Mesh(new THREE.ConeGeometry(2.9, ly - 0.3, 32, 1, true), this._beamMat());
     cone.position.set(x, (ly - 0.3) / 2, z);
     cone.renderOrder = 5;
-    this.scene.add(cone);
+    this.root.add(cone);
     this.lamps.push({ light, cone, pos: new THREE.Vector3(x, ly, z) });
   }
 
@@ -648,12 +695,12 @@ export class World {
     const lx = x + dx, lz = z + dz;
     const light = new THREE.PointLight(0xff9340, 90, 24, 2);
     light.position.set(lx, 7.0, lz);
-    this.scene.add(light);
+    this.root.add(light);
     // 빗속 빛줄기(가짜 볼류메트릭)
     const cone = new THREE.Mesh(new THREE.ConeGeometry(3.4, 7.0, 32, 1, true), this._beamMat());
     cone.position.set(lx, 3.6, lz);
     cone.renderOrder = 5;
-    this.scene.add(cone);
+    this.root.add(cone);
     this.lamps.push({ light, cone, pos: new THREE.Vector3(lx, 7, lz) });
   }
 
@@ -721,7 +768,7 @@ export class World {
     }
     const inner = new THREE.PointLight(0xcfe0ff, 55, 22, 2);
     inner.position.set(cx, h - 1.2, cz);
-    this.scene.add(inner);
+    this.root.add(inner);
     this.lamps.push({ light: inner });
   }
 
@@ -739,7 +786,7 @@ export class World {
     const cab = new THREE.BoxGeometry(3.4, 3, 3.4); cab.translate(x, legH - 1.5, z - 22); this.geo(cab, M.steel, false);
     for (const dz of [-70, 12]) {
       const m = new THREE.Mesh(new THREE.SphereGeometry(0.35, 10, 8), new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 0.05, 0.02).multiplyScalar(12) }));
-      m.position.set(x, legH + 4, z + dz); this.scene.add(m); this.blinkers.push(m);
+      m.position.set(x, legH + 4, z + dz); this.root.add(m); this.blinkers.push(m);
     }
   }
 
@@ -761,7 +808,7 @@ export class World {
       inst.setMatrixAt(n++, mat.compose(p, q, s));
     }
     inst.count = n;
-    this.scene.add(inst);
+    this.root.add(inst);
     // 원경 안개 그라데이션(스카이라인 하단을 흐리게)
     const hz = new THREE.Mesh(new THREE.CylinderGeometry(200, 200, 60, 48, 1, true), new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, side: THREE.BackSide, fog: false,
@@ -769,7 +816,7 @@ export class World {
       fragmentShader: 'varying float vY; void main(){ gl_FragColor = vec4(0.11,0.085,0.075, (1.0 - vY) * 0.85); }',
     }));
     hz.position.y = 25; hz.renderOrder = -5;
-    this.scene.add(hz); this.horizonRing = hz;
+    this.root.add(hz); this.horizonRing = hz;
   }
 
   // ---------------- 비 ----------------
@@ -815,7 +862,7 @@ export class World {
     this.rainMesh = new THREE.LineSegments(g, m);
     this.rainMesh.frustumCulled = false;
     this.rainMesh.renderOrder = 6;
-    this.scene.add(this.rainMesh);
+    this.root.add(this.rainMesh);
 
     // 지면 물방울 튀김
     const SP = 500;
@@ -851,7 +898,7 @@ export class World {
     this.splash = new THREE.Points(sg, sm);
     this.splash.frustumCulled = false;
     this.splash.renderOrder = 6;
-    this.scene.add(this.splash);
+    this.root.add(this.splash);
   }
 
   // ---------------- 충돌/레이캐스트 ----------------
@@ -938,22 +985,22 @@ export class World {
 
   // ---------------- 길찾기 격자 (A*) ----------------
   _buildNavGrid() {
-    const blocked = this.blocked = new Uint8Array(GN * GN);
+    const blocked = this.blocked = new Uint8Array(this.GN * this.GN);
     const pad = 0.45;
     for (const b of this.colliders) {
       if (b.minY > 1.6 || b.maxY < 0.3) continue;
-      const i0 = Math.max(0, Math.floor((b.minX - pad + HALF) / GRID)), i1 = Math.min(GN - 1, Math.floor((b.maxX + pad + HALF) / GRID));
-      const j0 = Math.max(0, Math.floor((b.minZ - pad + HALF) / GRID)), j1 = Math.min(GN - 1, Math.floor((b.maxZ + pad + HALF) / GRID));
-      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) blocked[j * GN + i] = 1;
+      const i0 = Math.max(0, Math.floor((b.minX - pad + this.H) / GRID)), i1 = Math.min(this.GN - 1, Math.floor((b.maxX + pad + this.H) / GRID));
+      const j0 = Math.max(0, Math.floor((b.minZ - pad + this.H) / GRID)), j1 = Math.min(this.GN - 1, Math.floor((b.maxZ + pad + this.H) / GRID));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) blocked[j * this.GN + i] = 1;
     }
-    for (let k = 0; k < GN; k++) { blocked[k] = blocked[(GN - 1) * GN + k] = blocked[k * GN] = blocked[k * GN + GN - 1] = 1; }
-    this._g = new Float32Array(GN * GN); this._from = new Int32Array(GN * GN); this._stamp = new Uint32Array(GN * GN); this._closed = new Uint32Array(GN * GN);
+    for (let k = 0; k < this.GN; k++) { blocked[k] = blocked[(this.GN - 1) * this.GN + k] = blocked[k * this.GN] = blocked[k * this.GN + this.GN - 1] = 1; }
+    this._g = new Float32Array(this.GN * this.GN); this._from = new Int32Array(this.GN * this.GN); this._stamp = new Uint32Array(this.GN * this.GN); this._closed = new Uint32Array(this.GN * this.GN);
     this._run = 0;
   }
 
-  cellOf(x, z) { return [Math.max(0, Math.min(GN - 1, Math.floor((x + HALF) / GRID))), Math.max(0, Math.min(GN - 1, Math.floor((z + HALF) / GRID)))]; }
-  cellCenter(i, j) { return new THREE.Vector3(i * GRID - HALF + GRID / 2, 0, j * GRID - HALF + GRID / 2); }
-  walkable(i, j) { return i >= 0 && j >= 0 && i < GN && j < GN && !this.blocked[j * GN + i]; }
+  cellOf(x, z) { return [Math.max(0, Math.min(this.GN - 1, Math.floor((x + this.H) / GRID))), Math.max(0, Math.min(this.GN - 1, Math.floor((z + this.H) / GRID)))]; }
+  cellCenter(i, j) { return new THREE.Vector3(i * GRID - this.H + GRID / 2, 0, j * GRID - this.H + GRID / 2); }
+  walkable(i, j) { return i >= 0 && j >= 0 && i < this.GN && j < this.GN && !this.blocked[j * this.GN + i]; }
 
   nearestWalkable(i, j) {
     if (this.walkable(i, j)) return [i, j];
@@ -969,11 +1016,11 @@ export class World {
     let [ti, tj] = this.nearestWalkable(...this.cellOf(to.x, to.z));
     const run = ++this._run;
     const g = this._g, fromA = this._from, stamp = this._stamp, closed = this._closed, B = this.blocked;
-    const start = sj * GN + si, goal = tj * GN + ti;
+    const start = sj * this.GN + si, goal = tj * this.GN + ti;
     const heap = [], hf = [];
     const push = (n, f) => { heap.push(n); hf.push(f); let c = heap.length - 1; while (c > 0) { const p = (c - 1) >> 1; if (hf[p] <= hf[c]) break; [heap[p], heap[c]] = [heap[c], heap[p]]; [hf[p], hf[c]] = [hf[c], hf[p]]; c = p; } };
     const pop = () => { const top = heap[0]; const ln = heap.pop(), lf = hf.pop(); if (heap.length) { heap[0] = ln; hf[0] = lf; let c = 0; for (;;) { const l = c * 2 + 1, r = l + 1; let m = c; if (l < heap.length && hf[l] < hf[m]) m = l; if (r < heap.length && hf[r] < hf[m]) m = r; if (m === c) break; [heap[m], heap[c]] = [heap[c], heap[m]]; [hf[m], hf[c]] = [hf[c], hf[m]]; c = m; } } return top; };
-    const hcost = (n) => { const dx = Math.abs((n % GN) - ti), dz = Math.abs(((n / GN) | 0) - tj); return Math.max(dx, dz) + 0.414 * Math.min(dx, dz); };
+    const hcost = (n) => { const dx = Math.abs((n % this.GN) - ti), dz = Math.abs(((n / this.GN) | 0) - tj); return Math.max(dx, dz) + 0.414 * Math.min(dx, dz); };
     g[start] = 0; stamp[start] = run; fromA[start] = -1; push(start, hcost(start));
     let found = false, iter = 0;
     while (heap.length && iter++ < 9000) {
@@ -981,14 +1028,14 @@ export class World {
       if (closed[n] === run) continue;
       closed[n] = run;
       if (n === goal) { found = true; break; }
-      const ni = n % GN, nj = (n / GN) | 0;
+      const ni = n % this.GN, nj = (n / this.GN) | 0;
       for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
         if (!di && !dj) continue;
         const ai = ni + di, aj = nj + dj;
-        if (ai < 0 || aj < 0 || ai >= GN || aj >= GN) continue;
-        const a = aj * GN + ai;
+        if (ai < 0 || aj < 0 || ai >= this.GN || aj >= this.GN) continue;
+        const a = aj * this.GN + ai;
         if (B[a] || closed[a] === run) continue;
-        if (di && dj && (B[nj * GN + ai] || B[aj * GN + ni])) continue; // 모서리 끼임 방지
+        if (di && dj && (B[nj * this.GN + ai] || B[aj * this.GN + ni])) continue; // 모서리 끼임 방지
         const ng = g[n] + (di && dj ? 1.414 : 1);
         if (stamp[a] !== run || ng < g[a]) { stamp[a] = run; g[a] = ng; fromA[a] = n; push(a, ng + hcost(a)); }
       }
@@ -998,7 +1045,7 @@ export class World {
     for (let n = goal; n !== -1; n = fromA[n]) cells.push(n);
     cells.reverse();
     // 경로 단순화: 직선으로 걸어갈 수 있으면 중간점 생략
-    const pts = cells.map((n) => this.cellCenter(n % GN, (n / GN) | 0));
+    const pts = cells.map((n) => this.cellCenter(n % this.GN, (n / this.GN) | 0));
     const out = [];
     let k = 0;
     while (k < pts.length - 1) {
@@ -1013,7 +1060,7 @@ export class World {
     const d = a.distanceTo(b), n = Math.ceil(d / (GRID * 0.5));
     for (let s = 1; s < n; s++) {
       const t = s / n; const [i, j] = this.cellOf(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t);
-      if (this.blocked[j * GN + i]) return false;
+      if (this.blocked[j * this.GN + i]) return false;
     }
     return true;
   }
@@ -1040,20 +1087,26 @@ export class World {
   }
 
   // ---------------- 프레임 업데이트 ----------------
+  // 그림자 카메라를 플레이어 주변으로 (텍셀 단위로 스냅해 떨림 방지)
+  _followShadow(focus) {
+    const sz = this.sun.shadow.mapSize.x || 2048;
+    const span = this.sun.shadow.camera.right - this.sun.shadow.camera.left;
+    const texel = span / sz;
+    const fx = Math.round(focus.x / texel) * texel, fz = Math.round(focus.z / texel) * texel;
+    this.sun.target.position.set(fx, 0, fz);
+    this.sun.position.set(fx + this.sunDir.x * 110, this.sunDir.y * 110, fz + this.sunDir.z * 110);
+  }
+
   update(dt, cam, focus) {
     this.timeU.value += dt;
     const t = this.timeU.value;
+    if (this.tex.water) this.tex.water.offset.set(t * 0.004, t * 0.009);
+    if (this.day) { this._followShadow(focus); return; }
     this.sky.position.copy(cam.position);
     this.horizonRing.position.x = cam.position.x; this.horizonRing.position.z = cam.position.z;
     this.rainU.uCam.value.copy(cam.position);
-    this.tex.water.offset.set(t * 0.004, t * 0.009);
 
-    // 그림자 카메라를 플레이어 주변으로 (텍셀 단위로 스냅해 떨림 방지)
-    const sz = this.sun.shadow.mapSize.x || 2048;
-    const texel = 76 / sz;
-    const fx = Math.round(focus.x / texel) * texel, fz = Math.round(focus.z / texel) * texel;
-    this.sun.target.position.set(fx, 0, fz);
-    this.sun.position.set(fx + this.sunDir.x * 90, this.sunDir.y * 90, fz + this.sunDir.z * 90);
+    this._followShadow(focus);
 
     // 번개
     this.nextLightning -= dt;
