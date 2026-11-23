@@ -1,6 +1,9 @@
 # TRAY MUSIC
 
-Galaxy S23 Ultra / Galaxy Watch5 Pro 개인 전용 음악 관리 앱. 기준 문서: `docs/TRAY_MUSIC_ULTIMATE_v1.0.md`
+Galaxy S23 Ultra / Galaxy Watch5 Pro 개인 전용 음악 관리 앱.
+
+> 같은 저장소의 별도 프로젝트: [`tray-fps/`](tray-fps/README.md) — 모바일·PC 웹 3D FPS **TRAY BLACK RAIN** (싱글 + 멀티 협동, GitHub Pages 배포)
+ 기준 문서: `docs/TRAY_MUSIC_ULTIMATE_v1.0.md`
 
 ## 현재 상태 (정직한 표시)
 
