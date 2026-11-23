@@ -1,0 +1,16 @@
+.gradle/
+build/
+*/build/
+.idea/
+*.iml
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+
+# 비밀값/개인 설정 — 절대 커밋 금지
+local.properties
+secrets.properties
+*.jks
+*.keystore
+keystore.properties

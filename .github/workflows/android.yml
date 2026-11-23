@@ -1,0 +1,83 @@
+name: Build TRAY MUSIC APK
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      # 저장소 Secrets (Settings > Secrets and variables > Actions)
+      #   YOUTUBE_API_KEY            : (선택) 공개 재생목록 조회용 API 키
+      #   TRAY_KEYSTORE_BASE64       : (권장) 개인 서명 키 .jks 를 base64 인코딩한 값
+      #   TRAY_KEYSTORE_PASSWORD / TRAY_KEY_ALIAS / TRAY_KEY_PASSWORD
+      # 서명 키가 없으면 매 빌드마다 SHA-1 이 바뀌는 임시 디버그 키로 서명되므로 Google 로그인이 동작하지 않는다.
+      - name: Prepare secrets
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          KS_B64: ${{ secrets.TRAY_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.TRAY_KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.TRAY_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.TRAY_KEY_PASSWORD }}
+        run: |
+          echo "YOUTUBE_API_KEY=${YOUTUBE_API_KEY}" > secrets.properties
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > tray-release.jks
+            {
+              echo "storeFile=tray-release.jks"
+              echo "storePassword=${KS_PASS}"
+              echo "keyAlias=${KS_ALIAS}"
+              echo "keyPassword=${KEY_PASS}"
+            } > keystore.properties
+            echo "SIGNED=true" >> "$GITHUB_ENV"
+          else
+            echo "SIGNED=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build
+        run: |
+          if [ "$SIGNED" = "true" ]; then
+            gradle --no-daemon :app-mobile:assembleRelease
+          else
+            gradle --no-daemon :app-mobile:assembleDebug
+          fi
+
+      - name: Collect APK + checksum + signing fingerprint
+        run: |
+          mkdir -p out
+          APK=$(find app-mobile/build/outputs/apk -name "*.apk" | head -n1)
+          cp "$APK" out/TRAY_MUSIC_MOBILE.apk
+          cd out
+          sha256sum TRAY_MUSIC_MOBILE.apk > TRAY_MUSIC_MOBILE.apk.sha256
+          BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -n1)
+          "$BT/apksigner" verify --print-certs TRAY_MUSIC_MOBILE.apk > SIGNING_CERT.txt
+          echo "signed_with_personal_key=$SIGNED" >> SIGNING_CERT.txt
+          cat SIGNING_CERT.txt TRAY_MUSIC_MOBILE.apk.sha256
+
+      - name: Unit tests
+        run: gradle --no-daemon :app-mobile:testDebugUnitTest
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TRAY_MUSIC_MOBILE
+          path: out/
