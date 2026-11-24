@@ -2,6 +2,8 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
+import { loadMixamo } from './anim.js';
+
 const BASE = new URL('../assets/', import.meta.url).href;
 
 // ── 보안 정책(CSP)이 엄격한 페이지에서도 동작하는 glTF 로더 ──
@@ -140,6 +142,7 @@ export class Assets {
   // 실사 캐릭터·총기 (Sketchfab CC-BY, 원본 지오메트리 그대로 + WebP 텍스처). 원본 씬과 애니메이션을 그대로 보관
   async loadReal(ids = ['swat', 'fsb', 'm16', 'tac_suit', 'ar_ak47t']) {
     this.real = this.real || {};
+    if (this.mixamo === undefined) this.mixamo = await loadMixamo();
     await Promise.all(ids.filter((id) => !this.real[id]).map((id) => loadGLTF(`${BASE}real/${id}/${id}.json`).then((g) => {
       g.scene.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = !o.isSkinnedMesh; [].concat(o.material).forEach((m) => { if (m.map) m.map.anisotropy = Math.min(8, this.maxAniso); }); } });
       this.real[id] = { scene: g.scene, animations: g.animations };

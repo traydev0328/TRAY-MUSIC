@@ -225,6 +225,7 @@ export function buildOperator(op) {
 
 // ─────────── 실사 대원 (Sketchfab CC-BY, Mixamo 뼈대) ───────────
 import { clone as skClone } from 'three/addons/utils/SkeletonUtils.js';
+import { retarget, AnimCtl } from './anim.js';
 
 const boneName = (n) => n.replace(/^.*mixamorig:?/, '').replace(/_\d+$/, '').replace(/_end$/, '');
 
@@ -242,9 +243,13 @@ export function buildRealOperator(op, variant) {
   s.scale.multiplyScalar(k); s.updateMatrixWorld(true);
   s.position.y -= Math.min(wp(bones.LeftToeBase || bones.LeftFoot).y, wp(bones.RightToeBase || bones.RightFoot).y) - 0.03;
   op.root.add(s);
+  pinStaticParts(s, bones);
   const rest = new Map(); for (const b of Object.values(bones)) rest.set(b, b.quaternion.clone());
   let mixer = null;
-  if (src.animations.length) { mixer = new THREE.AnimationMixer(s); mixer.clipAction(src.animations[0]).play(); mixer.update(Math.random() * 3); }
+  // Mixamo 모션캡처 동작이 있으면 리타깃해서 사용, 없으면 모델 자체 동작 + 뼈 직접 회전
+  const set = G.assets.mixamo && retarget(src.scene, G.assets.mixamo);
+  if (set) { op.anim = new AnimCtl(s, set); op.anim.mixer.update(0); }
+  else if (src.animations.length) { mixer = new THREE.AnimationMixer(s); mixer.clipAction(src.animations[0]).play(); mixer.update(Math.random() * 3); }
   // 판정 박스 (보이지 않음, 레이캐스트 전용)
   const hm = new THREE.MeshBasicMaterial({ visible: false });
   // 뼈마다 실제 월드 배율이 다르다(모델 내부 단위 변환 포함) → 판정 박스를 미터 단위로 맞추려면 각 뼈의 월드 배율로 나눠야 함
@@ -272,10 +277,48 @@ export function buildRealOperator(op, variant) {
 // 뼈 단위 절차적 동작: 걷기(다리), 앉기, 상체 조준 기울기. 대기 동작(mixer)은 그 위에 덧입힘
 const _q = new THREE.Quaternion(), _ax = new THREE.Vector3(1, 0, 0);
 export const LEG_SIGN = -1; // 화면 확인으로 조정한 Mixamo 다리 회전 방향
+// 뼈에 묶이지 않은 부품(모델에 포함된 총·탄창 파우치·패치 등)을 원래 자세 그대로 가장 가까운 뼈에 고정한다.
+// 이렇게 해야 모션캡처로 몸이 움직여도 총은 손에, 파우치는 허리에 붙어 따라간다. 총은 항상 오른손.
+function pinStaticParts(s, bones) {
+  s.updateMatrixWorld(true);
+  const groups = new Set();
+  const hasRig = (o) => { let r = false; o.traverse((c) => { if (c.isBone || c.isSkinnedMesh) r = true; }); return r; };
+  s.traverse((o) => {
+    if (!o.isMesh || o.isSkinnedMesh) return;
+    for (let p = o.parent; p; p = p.parent) if (p.isBone) return; // 이미 뼈 아래에 있음
+    let top = o;
+    while (top.parent && top.parent !== s && !hasRig(top.parent)) top = top.parent;
+    groups.add(top);
+  });
+  const list = Object.entries(bones).filter(([n]) => !/HeadTop_End|Toe_End|Hand(Thumb|Index|Middle|Ring|Pinky)/.test(n));
+  const bp = new Map(list.map(([, b]) => [b, b.getWorldPosition(new THREE.Vector3())]));
+  const seg = new THREE.Line3(), q = new THREE.Vector3();
+  for (const g of groups) {
+    const c = new THREE.Box3().setFromObject(g).getCenter(new THREE.Vector3());
+    let bone = /gun|rifle|weapon/i.test(g.name) ? bones.RightHand : null;
+    if (!bone) {
+      let best = Infinity;
+      for (const [, b] of list) {
+        const kid = b.children.find((k) => k.isBone && bp.has(k));
+        seg.set(bp.get(b), kid ? bp.get(kid) : bp.get(b));
+        const d = seg.closestPointToPoint(c, true, q).distanceTo(c);
+        if (d < best) { best = d; bone = b; }
+      }
+    }
+    if (bone) bone.attach(g);
+  }
+}
+
 export function animateReal(op, dt, speed, crouch, pitch) {
   const R = op.real; if (!R) return;
-  if (R.mixer) R.mixer.update(dt);
   const B = R.bones;
+  if (op.anim) {
+    // 모션캡처: 이동 방향·속도·앉기에 맞는 동작을 섞고, 조준 높이만 허리로 보정
+    op.anim.update(dt, op.vel ? op.vel.x : 0, op.vel ? op.vel.z : 0, op.yaw || 0, crouch);
+    if (!op.anim.dead) for (const b of [B.Spine1, B.Spine2]) if (b) b.quaternion.multiply(_q.setFromAxisAngle(_ax, -pitch * 0.32));
+    return;
+  }
+  if (R.mixer) R.mixer.update(dt);
   const set = (b, ang) => { if (!b) return; const base = R.mixer ? b.quaternion.clone() : R.rest.get(b).clone(); b.quaternion.copy(base.multiply(_q.setFromAxisAngle(_ax, ang))); };
   op.walkT = (op.walkT || 0) + dt * speed * 2.4;
   const a = Math.min(1, speed / 2.5);

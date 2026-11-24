@@ -89,7 +89,7 @@ export class Enemy {
     this.canSee = false; this.seenT = 0; this.lastSeen = null; this.alerted = false; this.lostT = 0;
     this.burstLeft = 0; this.shotT = 0; this.nextBurst = 1 + Math.random();
     this.strafeDir = Math.random() > 0.5 ? 1 : -1; this.strafeT = 0;
-    this.walkT = 0; this.flinch = 0; this.hasToken = false;
+    this.walkT = 0; this.flinch = 0; this.hasToken = false; this.bursts = 0;
     this.target = null; this.targetT = 0; this.gCool = 6 + Math.random() * 6;
     this.root = new THREE.Group();
     this.root.userData.enemy = this;
@@ -177,6 +177,7 @@ export class Enemy {
       this.die(dir, head);
       return { killed: true, head };
     }
+    if (this.anim && Math.random() < 0.55) this.anim.hit();
     return { killed: false };
   }
 
@@ -185,8 +186,9 @@ export class Enemy {
     if (!this.alive && this._dead) return;
     this.alive = false; this._dead = true;
     const G = this.G;
-    if (this.real) { // 실사 병력: 피격 방향으로 쓰러진 뒤 사라짐
+    if (this.real) { // 실사 병력: 사망 모션캡처(없으면 피격 방향으로 쓰러짐) 후 사라짐
       this.dieT = 0; this.dieDir = Math.atan2(dir.x, dir.z) - this.yaw;
+      if (this.anim) this.anim.die();
       G.effects.playerHit(this.aimPoint(), dir);
       G.enemies.dying.push(this);
       return;
@@ -334,12 +336,16 @@ export class Enemy {
       if (this.shotT <= 0) {
         this.shotT = T.rof; this.burstLeft--;
         this._shoot(dist);
-        if (this.burstLeft <= 0) { this.nextBurst = 0.9 + Math.random() * 1.4; E.releaseToken(this); }
+        if (this.burstLeft <= 0) {
+          this.nextBurst = 0.9 + Math.random() * 1.4; E.releaseToken(this);
+          // 실사 병력은 몇 차례 연사 뒤 재장전 동작
+          if (this.anim && ++this.bursts >= 4 + Math.floor(Math.random() * 3)) { this.bursts = 0; this.anim.reload(2.2); this.nextBurst = Math.max(this.nextBurst, 2.4); }
+        }
       }
     }
   }
 
-  _muzzleWorld() { return this.rig.muzzle.getWorldPosition(new THREE.Vector3()); }
+  _muzzleWorld() { return (this.gunMuzzle || this.rig.muzzle).getWorldPosition(new THREE.Vector3()); }
 
   _shoot(dist) {
     const G = this.G, P = this.target, T = this.T, W = G.world;
@@ -367,6 +373,7 @@ export class Enemy {
       if (P.isLocal && end.distanceTo(P.eye) < 4 && Math.random() < 0.4) G.audio.ricochetNear();
     }
     const dir = end.clone().sub(from).normalize();
+    if (this.anim) this.anim.fire();
     G.effects.enemyMuzzle(from, dir);
     G.effects.tracer(from, end, true);
     G.audio.gunshot(this.type === 'heavy' ? 'heavy' : 'enemy', from, 0.9);
@@ -375,6 +382,7 @@ export class Enemy {
 
   // 원격(참가자) 화면에서 적 사격 연출
   netFire(from, end) {
+    if (this.anim) this.anim.fire();
     const dir = end.clone().sub(from).normalize();
     this.G.effects.enemyMuzzle(from, dir);
     this.G.effects.tracer(from, end, true);
@@ -529,7 +537,9 @@ export class Operator extends Enemy {
     this.vel.set((this.pos.x - px) / Math.max(dt, 1e-3), 0, (this.pos.z - pz) / Math.max(dt, 1e-3));
     if (this.real) {
       const crouchR = Math.max(0, Math.min(1, (1.75 - this.netH) / 0.75));
+      if (this.anim) { if (!this.netAlive) this.anim.die(); else this.anim.revive(); }
       animateReal(this, dt, Math.hypot(this.vel.x, this.vel.z), crouchR, this.netPitch);
+      if (this.anim) { this.root.position.copy(this.pos); this.root.rotation.set(0, this.yaw, 0); return; }
       this.downT += ((this.netAlive ? 0 : 1) - this.downT) * Math.min(1, dt * 4);
       this.root.position.set(this.pos.x, this.pos.y + this.downT * 0.15, this.pos.z);
       this.root.rotation.set(-this.downT * 1.45, this.yaw, 0, 'YXZ');
@@ -554,6 +564,7 @@ export class Operator extends Enemy {
     this.tag.visible = true;
   }
   shotFx(end) {
+    if (this.anim) this.anim.fire();
     const from = this._muzzleWorld();
     const dir = end.clone().sub(from).normalize();
     this.G.effects.enemyMuzzle(from, dir);
@@ -568,13 +579,39 @@ let RIFLE_TPL = null;
 function attachRifle(e) {
   const G = e.G, src = G.assets.real.ar_ak47t;
   if (!src) return;
-  if (!RIFLE_TPL) { const m = buildRealViewmodel(G.weapons, 'ar_ak47t', GUNS.ar_ak47t, src); RIFLE_TPL = { gun: m.gun, muzzleZ: m.muzzle.position.z }; }
+  if (!RIFLE_TPL) { const m = buildRealViewmodel(G.weapons, 'ar_ak47t', GUNS.ar_ak47t, src); RIFLE_TPL = { gun: m.gun, muzzleZ: m.muzzle.position.z, rightHand: m.rightHand.clone(), leftHand: m.leftHand.clone() }; }
   const g = RIFLE_TPL.gun.clone(true);
   g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.raycast = () => {}; } if (o.isGroup && o.children.length && o.children[0].material && o.children[0].material.blending === THREE.AdditiveBlending) o.visible = false; });
   g.rotation.y = Math.PI; // 1인칭 기준(-z 앞) → 캐릭터 기준(+z 앞)
   g.position.set(0.1, 1.33, 0.22);
   e.root.add(g);
   e.rig.muzzle.position.set(0.1, 1.33, 0.22 - RIFLE_TPL.muzzleZ);
+  if (e.anim) gripInHands(e, g, RIFLE_TPL);
+}
+
+// 모션캡처 캐릭터: 총을 오른손에 쥐여 손과 함께 움직이게 한다.
+// 현재 자세(소총 대기)에서 손잡이 = 오른손 손바닥, 총열 방향 = 오른손→왼손 이 되도록 놓은 뒤 오른손 뼈에 고정
+const _m4 = new THREE.Matrix4();
+function gripInHands(e, g, T) {
+  const B = e.real.bones, rh = B.RightHand, lh = B.LeftHand;
+  if (!rh || !lh) return;
+  e.root.updateMatrixWorld(true);
+  const inv = _m4.copy(e.root.matrixWorld).invert();
+  const palm = (h, mid) => { const p = h.getWorldPosition(new THREE.Vector3()); if (mid) p.lerp(mid.getWorldPosition(new THREE.Vector3()), 0.45); return p.applyMatrix4(inv); };
+  const RH = palm(rh, B.RightHandMiddle1), LH = palm(lh, B.LeftHandMiddle1);
+  const vg = T.leftHand.clone().sub(T.rightHand).normalize();
+  const vc = LH.clone().sub(RH).normalize();
+  const q = new THREE.Quaternion().setFromUnitVectors(vg, vc);
+  // 총 윗면이 최대한 위를 향하도록 총열 축 둘레로 굴림 보정
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(q), want = new THREE.Vector3(0, 1, 0).projectOnPlane(vc).normalize();
+  up.projectOnPlane(vc).normalize();
+  let ang = Math.acos(THREE.MathUtils.clamp(up.dot(want), -1, 1)); if (up.clone().cross(want).dot(vc) < 0) ang = -ang;
+  q.premultiply(new THREE.Quaternion().setFromAxisAngle(vc, ang));
+  g.quaternion.copy(q);
+  g.position.copy(RH).sub(T.rightHand.clone().applyQuaternion(q));
+  g.updateMatrixWorld(true);
+  rh.attach(g);
+  e.gunMuzzle = new THREE.Object3D(); e.gunMuzzle.position.set(0, 0, T.muzzleZ); g.add(e.gunMuzzle);
 }
 
 function makeTag(text) {
@@ -713,6 +750,12 @@ export class Enemies {
     // 실사 병력 사망 연출: 0.6초에 걸쳐 쓰러지고 6초 뒤 땅으로 가라앉아 제거
     for (let i = this.dying.length - 1; i >= 0; i--) {
       const e = this.dying[i]; e.dieT += dt;
+      if (e.anim) {
+        e.anim.update(dt, 0, 0, e.yaw, 0);
+        e.root.position.y = e.pos.y - Math.max(0, e.dieT - 6) * 0.3;
+        if (e.dieT > 7.5) { e.root.removeFromParent(); this.dying.splice(i, 1); }
+        continue;
+      }
       const k = Math.min(1, e.dieT / 0.6), f = k * k;
       e.root.rotation.set(-Math.cos(e.dieDir) * 1.5 * f, e.yaw, Math.sin(e.dieDir) * 1.5 * f, 'YXZ');
       e.root.position.y = e.pos.y + 0.12 * f - Math.max(0, e.dieT - 6) * 0.3;
