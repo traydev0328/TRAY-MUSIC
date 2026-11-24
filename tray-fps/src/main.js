@@ -614,6 +614,7 @@ const GFX_UI = [
   { k: 'ao', label: '주변광 차폐(GTAO)', hint: () => '구석·접지면 그림자 · 매우 무거움', type: 'tog' },
   { k: 'bloom', label: '빛 번짐(블룸)', type: 'tog' },
   { k: 'lamps', label: '야간 가로등 조명', type: 'tog' },
+  { k: 'detail', label: '건물 세부 묘사', hint: () => '창틀·발코니 난간·꽃 넝쿨 · 끄면 가벼워짐 (메뉴에서 바꾸면 맵 다시 불러옴)', type: 'tog', reload: true },
   { k: 'rain', label: '빗줄기 밀도 (야간 맵)', type: 'range', min: 0, max: 1, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
   { k: 'grain', label: '필름 그레인', type: 'tog' },
   { k: 'ca', label: '색수차', type: 'tog' },
@@ -632,6 +633,7 @@ function buildGfxRows() {
     const setv = (v) => {
       if (c.top) settings[c.k] = v; else { settings.gfx[c.k] = v; settings.quality = 'custom'; }
       applyGraphics(false); syncSettings();
+      if (c.reload && G.state === 'menu' && G.world) G.loadMap(G.world.mapId); // 맵 형상에 영향 → 메뉴에서는 즉시 다시 생성
     };
     let el;
     if (c.type === 'range') {
