@@ -3,12 +3,13 @@
 // 각 플레이어는 자기 이동을 직접 계산해 방장에게 보낸다(협동 모드라 신뢰 기반).
 // 전송: PeerJS(WebRTC 데이터채널, 무료 공개 신호 서버). ?net=local 이면 같은 브라우저 탭끼리 BroadcastChannel 로 테스트.
 import * as THREE from 'three';
-import { Operator, TYPE_KEYS } from './enemies.js';
+import { Operator, TYPE_KEYS, pickSkin, ALLY_SKINS, FOE_SKINS } from './enemies.js';
+import { BOT_SKINS } from './bomb.js';
 
 const PEERJS_URL = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
 const PREFIX = 'traybr7-';
 const SEND_HZ = 20;
-export const MAX_PLAYERS = 4;
+export const MAX_PLAYERS = 10; // 폭파 작전 5대5 기준. 방장 기기·회선이 감당할 수 있는 만큼(휴대폰 방장은 4~6명 권장)
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const r2 = (v) => Math.round(v * 100) / 100;
 
@@ -78,7 +79,9 @@ class Teammate {
     // 팀 대전: 알파=공격팀 장비(SWAT), 브라보=수비팀 장비(FSB) / 그 외: 번갈아
     const M = this.G.match, idx = [...this.G.net.mates.keys()].indexOf(this.id);
     // 협동: 아군은 SWAT 로 통일(적 FSB 와 구분) / 개인전: 번갈아
-    const variant = M.mode === 'tdm' ? (M.teamOf(this.id) === 0 ? 'swat' : 'fsb') : M.mode === 'coop' ? 'swat' : (idx % 2 ? 'fsb' : 'swat');
+    // 팀 대전: 알파=아군 장비 로스터, 브라보=적 장비 로스터 / 협동: 아군 로스터 / 개인전: 전체를 번갈아
+    const variant = (M.mode === 'tdm' || M.mode === 'bomb') ? pickSkin(this.G, M.teamOf(this.id) === 0 ? ALLY_SKINS : FOE_SKINS, idx)
+      : M.mode === 'coop' ? pickSkin(this.G, ALLY_SKINS, idx + 1) : pickSkin(this.G, [...ALLY_SKINS, ...FOE_SKINS, 'fsb'], idx);
     this.avatar = new Operator(this.G, this.p, this.name, variant);
     this.avatar.pos.copy(this.p);
     this.avatar.root.userData.mate = this;
@@ -243,11 +246,12 @@ export class Net {
       case 'propHit': { const rec = G.world.explosives[m.i]; if (rec) G.combat.damageProp(rec, m.d, pid); break; }
       case 'dead': {
         const mt = this.mates.get(pid); if (mt) mt.alive = false;
-        if (G.match.pvp) { G.match.recordKill(pid, m.by || null); break; }
+        if (G.match.pvp) { G.match.recordKill(pid, m.by || null); if (G.bomb.active && m.by) G.bomb.rewardKill(m.by); break; }
         G.hud.feed(`${P.name} 전사`, 0); this.broadcast({ t: 'feed', txt: `${P.name} 전사`, pts: 0 }, pid); G.checkAllDead(); break;
       }
       case 'phit': this._applyPlayerHit(pid, m.v, m.d, m.p); break;
       case 'team': if (G.state !== 'playing') this.switchTeam(pid); break;
+      case 'buse': if (G.bomb.active) G.bomb.useHeld.set(pid, !!m.on); break;
     }
   }
 
@@ -289,7 +293,7 @@ export class Net {
       case 'teams': this.teams = new Map(m.teams); G.match.teams = new Map(m.teams); break;
       case 'pscore': G.match.applyScore(m); break;
       case 'mend': G.match.over = true; G.matchEnd(m); break;
-      case 'full': this.close(); G.netLost('방이 가득 찼습니다 (최대 4명).'); break;
+      case 'full': this.close(); G.netLost(`방이 가득 찼습니다 (최대 ${MAX_PLAYERS}명).`); break;
       case 'start': G.netStart(m); break;
       case 's': this._applySnap(m); break;
       case 'kill': G.enemies.puppetKill(m.id, this.V(m.d), !!m.h); if (m.by === this.myId) { G.hud.hitmarker(true); } break;
@@ -306,6 +310,12 @@ export class Net {
       case 'feed': G.hud.feed(m.txt, m.pts); break;
       case 'respawn': G.respawnLocal(); break;
       case 'over': G.netOver(m); break;
+      // 폭파 작전
+      case 'bround': G.bomb.onRoundMsg(m); break;
+      case 'bend': if (G.bomb.client) { G.bomb.score = m.sc; G.bomb._roundResult(m.w, m.r, m.lp); } break;
+      case 'bplant': if (G.bomb.client) { if (G.bomb.attackers === G.bomb.playerTeam) G.bomb.credits += 300; G.bomb.bomb.timer = 40; G.hud.banner('폭탄 설치됨', `${m.s} 지점 · 40초`); G.audio.alert(this.V(m.p)); } break;
+      case 'bexp': G.combat.explode(this.V(m.p).setY(0.6), { radius: 22, dmg: 600, owner: 'enemy', scale: 3 }); G.bomb._removeBomb(); break;
+      case 'bcred': if (G.bomb.active) { G.bomb.credits = Math.min(9000, G.bomb.credits + (m.a || 0)); if (m.k) G.bomb.kills++; } break;
     }
   }
 
@@ -314,7 +324,8 @@ export class Net {
     this.hud.wave = m.w; this.hud.left = m.l; this.hud.score = m.sc;
     if (typeof m.tm === 'number') G.match.timeLeft = m.tm;
     G.wave = m.w; G.score = m.sc;
-    for (const e of m.e) G.enemies.syncPuppet(e[0], TYPE_KEYS[e[1]], e[2], e[3], e[4], e[5], e[6]);
+    for (const e of m.e) G.enemies.syncPuppet(e[0], TYPE_KEYS[e[1]], e[2], e[3], e[4], e[5], e[6], e[7], BOT_SKINS[e[8]]);
+    if (m.b) G.bomb.applySnap(m.b);
     for (const p of m.p) {
       if (p[0] === this.myId) continue;
       const mt = this.mates.get(p[0]);
@@ -365,7 +376,7 @@ export class Net {
     if (!M.pvp || M.over || typeof dmg !== 'number' || dmg <= 0) return;
     const shooter = G.targetById(by), victim = G.targetById(victimId);
     if (!shooter || !victim || !shooter.alive || !victim.alive || by === victimId) return;
-    if (M.mode === 'tdm' && M.teamOf(by) === M.teamOf(victimId)) return; // 아군 사격 무효
+    if (M.mode !== 'ffa' && M.teamOf(by) === M.teamOf(victimId)) return; // 아군 사격 무효 (팀 대전·폭파 작전)
     if (shooter.pos.distanceTo(victim.pos) > 250) return; // 비정상 거리
     const a = Math.min(dmg, 80);
     if (victim.isLocal) G.player.damage(a, shooter.pos.clone(), by);
@@ -393,9 +404,10 @@ export class Net {
     const P = G.player;
     const me = [r2(P.pos.x), r2(P.pos.y), r2(P.pos.z), r2(P.yaw), r2(P.pitch), r2(P.height), Math.round(P.hp), P.alive ? 1 : 0];
     if (this.isHost) {
-      const e = G.enemies.list.filter((x) => x.alive).map((x) => [x.id, TYPE_KEYS.indexOf(x.type), r2(x.pos.x), r2(x.pos.y), r2(x.pos.z), r2(x.yaw), x.canSee ? 1 : 0]);
+      // 적/봇: [번호, 종류, x, y, z, 방향, 발견, 팀(-1=웨이브 적), 외형 번호]
+      const e = G.enemies.list.filter((x) => x.alive).map((x) => [x.id, TYPE_KEYS.indexOf(x.type), r2(x.pos.x), r2(x.pos.y), r2(x.pos.z), r2(x.yaw), x.canSee ? 1 : 0, x.team ?? -1, BOT_SKINS.indexOf(x.variant)]);
       const p = [[this.myId, ...me], ...[...this.mates.values()].map((m) => [m.id, r2(m.p.x), r2(m.p.y), r2(m.p.z), r2(m.yaw), r2(m.pitch), r2(m.h), Math.round(m.hp), m.alive ? 1 : 0])];
-      this.broadcastU({ t: 's', w: G.wave, l: G.waves.remaining(), sc: G.score, tm: Math.round(G.match.timeLeft), e, p });
+      this.broadcastU({ t: 's', w: G.wave, l: G.waves.remaining(), sc: G.score, tm: Math.round(G.match.timeLeft), e, p, ...(G.bomb.active ? { b: G.bomb.snap() } : {}) });
     } else {
       this._send(this.st && this.st.open ? this.st : this.evt, { t: 'u', s: me });
       // 오래 갱신되지 않은 퍼펫 정리

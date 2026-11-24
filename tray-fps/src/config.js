@@ -45,7 +45,7 @@ export function loadSettings() {
   if (!settings.quality || (!GFX_PRESETS[settings.quality] && settings.quality !== 'custom')) settings.quality = IS_TOUCH ? 'medium' : 'high';
   if (!settings.gfx) settings.gfx = presetGfx(settings.quality === 'custom' ? 'high' : settings.quality);
   for (const k of GFX_KEYS) if (settings.gfx[k] === undefined) settings.gfx[k] = GFX_PRESETS.high[k];
-  if (!['port', 'town'].includes(settings.map)) settings.map = 'town';
+  if (!['port', 'town', 'refinery'].includes(settings.map)) settings.map = 'town';
 }
 
 export function saveSettings() {

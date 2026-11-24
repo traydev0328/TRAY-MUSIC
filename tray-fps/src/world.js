@@ -4,6 +4,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import * as TX from './textures.js';
 import { buildTown } from './map-town.js';
+import { buildRefinery } from './map-refinery.js';
 
 const GRID = 1;            // 길찾기 격자 셀 크기(m)
 
@@ -13,7 +14,7 @@ export class World {
   constructor(G, assets, mapId = 'port') {
     this.G = G;
     this.mapId = mapId;
-    this.H = mapId === 'town' ? 75 : 60;   // 맵 반경(m)
+    this.H = { town: 75, refinery: 70 }[mapId] || 60;   // 맵 반경(m)
     this.GN = (this.H * 2) / GRID;
     this.root = new THREE.Group();
     G.scene.add(this.root);
@@ -37,6 +38,7 @@ export class World {
   // ---------------- 빌드 ----------------
   async build(progress) {
     if (this.mapId === 'town') return this._buildDay(progress, buildTown);
+    if (this.mapId === 'refinery') return this._buildDay(progress, buildRefinery, 'desert');
     const step = async (p, label) => { progress(p, label); await tick(); };
     const A = this.A;
     await step(0.05, '콘크리트 표면 준비');
@@ -80,27 +82,30 @@ export class World {
   }
 
   // ── 낮 맵 공통 빌드: 실사 하늘 사진 배경 + 사진 속 태양 방향과 일치하는 햇빛 + HDRI 환경광 ──
-  async _buildDay(progress, layoutFn) {
+  async _buildDay(progress, layoutFn, kind = 'town') {
     const step = async (p, label) => { progress(p, label); await tick(); };
-    this.day = true;
+    this.day = true; this.dayKind = kind;
     await step(0.05, '낮 하늘·실사 텍스처 받는 중');
-    await this.A.loadDay();
+    await this.A.loadDay(kind);
     await step(0.3, '재질 준비');
     this.tex = { crate: TX.crateWood(51), micro: TX.microDetail(61), barrier: TX.concrete(23, { base: 0.5 }), water: TX.waterNormal(71), paint: TX.wornPaint(81) };
     // 하늘: 4K 실사 사진(등장방형). 톤매핑 후 사진 밝기가 유지되도록 배경 밝기 보정
     const S = this.scene;
     if (this.A.daySky) { S.background = this.A.daySky; S.backgroundIntensity = 1.0; }
     else S.background = new THREE.Color(0x9fc3e6);
-    S.fog = new THREE.FogExp2(new THREE.Color().setRGB(0.62, 0.7, 0.8, THREE.LinearSRGBColorSpace), 0.0032);
+    S.fog = kind === 'desert'
+      ? new THREE.FogExp2(new THREE.Color().setRGB(0.78, 0.68, 0.54, THREE.LinearSRGBColorSpace), 0.0036)   // 모래 먼지 섞인 대기
+      : new THREE.FogExp2(new THREE.Color().setRGB(0.62, 0.7, 0.8, THREE.LinearSRGBColorSpace), 0.0032);
     // 태양: HDRI 최대 밝기 픽셀에서 계산한 방향 (assets/hdri/day_sky.json)
     this.sunDir = new THREE.Vector3(...(this.A.daySun || [0.688, 0.264, 0.676])).normalize();
-    this.sun = new THREE.DirectionalLight(0xfff0dc, 3.1);
+    this.sun = new THREE.DirectionalLight(kind === 'desert' ? 0xfff2de : 0xfff0dc, kind === 'desert' ? 3.4 : 3.1);
     this.sun.castShadow = true;
     const sc = this.sun.shadow.camera; sc.left = -45; sc.right = 45; sc.top = 45; sc.bottom = -45; sc.near = 1; sc.far = 260;
     this.sun.shadow.bias = -0.0003; this.sun.shadow.normalBias = 0.04; this.sun.shadow.mapSize.set(2048, 2048);
     this.root.add(this.sun); this.root.add(this.sun.target);
-    this.hemi = new THREE.HemisphereLight(0xcfe0ff, 0x8f7c66, 0.35); this.root.add(this.hemi);
-    await step(0.45, '마을 건설');
+    this.hemi = kind === 'desert' ? new THREE.HemisphereLight(0xc9dcff, 0xb08a5c, 0.42) : new THREE.HemisphereLight(0xcfe0ff, 0x8f7c66, 0.35);
+    this.root.add(this.hemi);
+    await step(0.45, kind === 'desert' ? '정유소 건설' : '마을 건설');
     layoutFn(this);
     await step(0.7, '정적 메시 병합');
     this._mergeStatic();
@@ -1101,7 +1106,7 @@ export class World {
     this.timeU.value += dt;
     const t = this.timeU.value;
     if (this.tex.water) this.tex.water.offset.set(t * 0.004, t * 0.009);
-    if (this.day) { this._followShadow(focus); return; }
+    if (this.day) { this._followShadow(focus); if (this.onUpdate) this.onUpdate(dt, cam, t); return; }
     this.sky.position.copy(cam.position);
     this.horizonRing.position.x = cam.position.x; this.horizonRing.position.z = cam.position.z;
     this.rainU.uCam.value.copy(cam.position);

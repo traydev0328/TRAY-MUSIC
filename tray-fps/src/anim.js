@@ -9,7 +9,32 @@
 import * as THREE from 'three';
 
 const BASE = new URL('../assets/', import.meta.url).href;
-export const boneName = (n) => n.replace(/^.*mixamorig:?/, '').replace(/_\d+$/, '').replace(/_end$/, '');
+// 뼈 이름 → Mixamo 표준 이름. Mixamo 외에 Character Creator(CC_Base_*)·3ds Max Biped(Bip001 *) 리그도 대응
+const CC = { Hip: 'Hips', Waist: 'Spine', Spine01: 'Spine1', Spine02: 'Spine2', NeckTwist01: 'Neck', Head: 'Head' };
+const CC_SIDE = { Clavicle: 'Shoulder', Upperarm: 'Arm', Forearm: 'ForeArm', Hand: 'Hand', Thigh: 'UpLeg', Calf: 'Leg', Foot: 'Foot', ToeBase: 'ToeBase' };
+const BIP = { Pelvis: 'Hips', Spine: 'Spine', Spine1: 'Spine1', Spine2: 'Spine2', Neck: 'Neck', Head: 'Head' };
+const BIP_SIDE = { Clavicle: 'Shoulder', UpperArm: 'Arm', Forearm: 'ForeArm', Hand: 'Hand', Thigh: 'UpLeg', Calf: 'Leg', Foot: 'Foot', Toe0: 'ToeBase' };
+const FINGER = ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky'];
+function alias(n) {
+  let m = n.match(/^CC_Base_(?:(L|R)_)?(.+)$/);
+  if (m) {
+    const side = m[1] === 'L' ? 'Left' : m[1] === 'R' ? 'Right' : '';
+    if (!side) return CC[m[2]] || n;
+    if (CC_SIDE[m[2]]) return side + CC_SIDE[m[2]];
+    const f = m[2].match(/^(Thumb|Index|Mid|Ring|Pinky)([123])$/);
+    return f ? `${side}Hand${f[1] === 'Mid' ? 'Middle' : f[1]}${f[2]}` : n;
+  }
+  m = n.match(/^Bip0*1_(?:(L|R)_)?(.+)$/);
+  if (m) {
+    const side = m[1] === 'L' ? 'Left' : m[1] === 'R' ? 'Right' : '';
+    if (!side) return BIP[m[2]] || n;
+    if (BIP_SIDE[m[2]]) return side + BIP_SIDE[m[2]];
+    const f = m[2].match(/^Finger([0-4])([12]?)$/);
+    return f ? `${side}Hand${FINGER[+f[1]]}${f[2] ? +f[2] + 1 : 1}` : n;
+  }
+  return n;
+}
+export const boneName = (n) => alias(n.replace(/^.*mixamorig:?/, '').replace(/_\d+$/, '').replace(/_end$/, '').replace(/\s+/g, '_'));
 
 const LOCO = ['idle', 'walk', 'run', 'strafeL', 'strafeR', 'back', 'crouchIdle', 'crouchWalk'];
 // 제자리 동작의 기준 이동 속도(m/s) — 실제 이동 속도에 맞춰 재생 속도를 조절
@@ -72,8 +97,12 @@ export function retarget(scene, data) {
       const n = boneName(b.name); if (byName[n] !== b || !c.restDir[n]) continue;
       const cn = mainChild(n), kid = cn && byName[cn];
       let td = null;
-      // 바인드 자세 뼈 방향 = 바인드 회전 × 자식의 로컬 위치(뼈 길이는 자세와 무관)
-      if (kid && kid.parent === b) td = kid.position.clone().applyQuaternion(bindQ.get(b));
+      // 바인드 자세 뼈 방향 = 자식까지 이어진 뼈들의 (부모 바인드 회전 × 로컬 위치) 합. 중간 뼈(Spine3 등)가 있어도 동작
+      if (kid) {
+        const v = new THREE.Vector3(); let c = kid;
+        while (c && c !== b && c.parent && bindQ.has(c.parent)) { v.add(c.position.clone().applyQuaternion(bindQ.get(c.parent))); c = c.parent; }
+        if (c === b) td = v;
+      }
       if (!td || td.lengthSq() < 1e-12) { corr.set(b, new THREE.Quaternion()); continue; }
       corr.set(b, new THREE.Quaternion().setFromUnitVectors(td.normalize(), new THREE.Vector3(...c.restDir[n]).normalize()));
     }

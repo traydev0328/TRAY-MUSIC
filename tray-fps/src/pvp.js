@@ -6,6 +6,7 @@ export const MODES = {
   coop: { name: '협동 웨이브' },
   tdm: { name: '팀 대전', limit: 30, time: 480 },
   ffa: { name: '개인전', limit: 15, time: 480 },
+  bomb: { name: '폭파 작전' },
 };
 export const TEAM_NAMES = ['알파', '브라보'];
 const RESPAWN_DELAY = 4;
@@ -38,7 +39,7 @@ export class Match {
     if (this.mode === 'ffa') return true;
     return this.teamOf(id) !== this.teamOf(this.me);
   }
-  friendlyFire(owner) { return this.mode === 'tdm' && owner !== this.me && this.teams.has(owner) && this.teamOf(owner) === this.teamOf(this.me); }
+  friendlyFire(owner) { return (this.mode === 'tdm' || this.mode === 'bomb') && owner !== this.me && this.teams.has(owner) && this.teamOf(owner) === this.teamOf(this.me); }
   stat(id) { let s = this.stats.get(id); if (!s) { s = { kills: 0, deaths: 0 }; this.stats.set(id, s); } return s; }
 
   // ── 방장: 처치 기록 ──
@@ -48,6 +49,7 @@ export class Match {
     this.stat(victim).deaths++;
     const valid = killer && killer !== victim && killer !== 'world' && killer !== 'enemy';
     if (valid) { this.stat(killer).kills++; if (this.mode === 'tdm') this.teamScore[this.teamOf(killer)]++; }
+    if (this.mode === 'bomb') { const txt = `${valid ? (G.nameOf(killer) === '대원' && G.enemies.byId.get(killer) ? G.enemies.byId.get(killer).name : G.nameOf(killer)) : '폭발'} ▸ ${G.nameOf(victim)}`; G.hud.feed(txt, 0); G.net.broadcast({ t: 'feed', txt, pts: 0 }); this.broadcastScore(); return; }
     const txt = valid ? `${G.nameOf(killer)} ▸ ${G.nameOf(victim)}` : `${G.nameOf(victim)} 자폭`;
     G.hud.feed(txt, 0);
     G.net.broadcast({ t: 'feed', txt, pts: 0 });
@@ -103,7 +105,7 @@ export class Match {
       G.hud.setDown(`${Math.max(1, Math.ceil(this.respawnT))}초 후 재투입`);
       if (this.respawnT <= 0) this.respawn();
     }
-    if (!G.net.isHost) return;
+    if (!G.net.isHost || this.mode === 'bomb') return; // 폭파 작전은 라운드·시간을 BombMode 가 관리
     if (!this.over) { this.timeLeft -= dt; if (this.timeLeft <= 0) { this.timeLeft = 0; this.end(); } }
     // 고정 보급품 재생성
     for (const s of this.spots) {

@@ -9,9 +9,10 @@ import { Effects } from './effects.js';
 import { Player } from './player.js';
 import { Weapons, WEAPONS } from './weapons.js';
 import { PRIMARIES, SECONDARIES } from './arsenal.js';
-import { Enemies } from './enemies.js';
+import { Enemies, EXTRA_REAL } from './enemies.js';
+import { retarget } from './anim.js';
 import { Combat } from './combat.js';
-import { Net } from './net.js';
+import { Net, MAX_PLAYERS } from './net.js';
 import { Post } from './post.js';
 import { Match, MODES, TEAM_NAMES } from './pvp.js';
 import { BombMode } from './bomb.js';
@@ -342,6 +343,13 @@ async function boot() {
   if (m) openLobby(m[1].toUpperCase());
   last = performance.now();
   requestAnimationFrame(frame);
+  // 추가 병사 모델(풀 전술 장비·KSK·민병대·러시아군 + M4 계열 소총, 약 20MB)은 메뉴가 뜬 뒤 백그라운드로 받는다.
+  // 받는 동안 새로 나오는 병사는 기본 모델을 쓰고, 다 받으면 다양한 외형이 섞여 나온다. 동작 리타깃도 미리 계산해 첫 등장 시 끊김을 줄임
+  setTimeout(() => {
+    G.assets.loadReal(EXTRA_REAL).then(() => {
+      for (const id of EXTRA_REAL) { const r = G.assets.real[id]; if (r && !id.startsWith('ar_') && G.assets.mixamo) retarget(r.scene, G.assets.mixamo); }
+    }).catch((e) => console.warn('추가 병사 모델 실패', e));
+  }, 1500);
 }
 
 // ───────────── 품질/해상도 ─────────────
@@ -371,9 +379,9 @@ function applyGraphics(first) {
 }
 
 // 맵 교체 (메뉴에서 선택하거나 멀티 시작 시 방장의 맵으로)
-const MAP_NAMES = { town: '지중해 마을 · 낮', port: '제7 항만 · 비 내리는 밤' };
-G.loadMap = async (id) => {
-  if (G.world && G.world.mapId === id) return;
+const MAP_NAMES = { town: '지중해 마을 · 낮', refinery: '사막 정유소 · 한낮', port: '제7 항만 · 비 내리는 밤' };
+G.loadMap = async (id, force = false) => {
+  if (G.world && G.world.mapId === id && !force) return;
   settings.map = id; saveSettings();
   $('loading').hidden = false; $('load-err').textContent = '';
   progress(0.02, `${MAP_NAMES[id]} 불러오는 중`);
@@ -449,7 +457,8 @@ async function startGame(spawnIdx = 0) {
   G.input.reset(); G.input.ads = false; G.input.crouch = false;
   G.input.enabled = true; G.overlay = false;
   if (G.net.active) G.net.spawnMates();
-  if (G.match.pvp) { G.match.respawn(); G.waves.inter = -1; G.hud.banner(MODES[G.match.mode].name, G.match.mode === 'tdm' ? `${TEAM_NAMES[G.match.teamOf(G.match.me)]} 팀 · 먼저 ${MODES.tdm.limit}킬` : `먼저 ${MODES.ffa.limit}킬 달성`); }
+  if (G.match.pvp && G.match.mode === 'bomb') { G.waves.inter = -1; G.waves.queue = []; }
+  else if (G.match.pvp) { G.match.respawn(); G.waves.inter = -1; G.hud.banner(MODES[G.match.mode].name, G.match.mode === 'tdm' ? `${TEAM_NAMES[G.match.teamOf(G.match.me)]} 팀 · 먼저 ${MODES.tdm.limit}킬` : `먼저 ${MODES.ffa.limit}킬 달성`); }
   hideScreens(); show('hud', true); show('controls', IS_TOUCH);
   G.post.vmPass.enabled = true;
   G.state = 'playing';
@@ -478,7 +487,12 @@ G.resume = () => {
 G.addScore = (n) => { G.score += n; };
 
 G.onLocalDeath = () => {
-  if (G.bomb.active) { G.bomb.onPlayerDeath(); G.input.reset(); G.hud.feed('전사 · 다음 라운드에 재투입', 0); return; }
+  if (G.bomb.active) {
+    G.bomb.onPlayerDeath(); G.input.reset(); G.hud.feed('전사 · 다음 라운드에 재투입', 0);
+    if (G.net.isClient) G.net.sendHost({ t: 'dead', by: G.player.lastBy });
+    else if (G.net.isHost) { G.match.recordKill(G.net.myId, G.player.lastBy); if (G.player.lastBy) G.bomb.rewardKill(G.player.lastBy); }
+    return;
+  }
   if (!G.net.active) { G.gameOver(); return; }
   G.input.reset();
   if (G.match.pvp) {
@@ -549,7 +563,9 @@ G.netStart = async (m) => {
   if (m.map && m.map !== G.world.mapId) await G.loadMap(m.map);
   hideScreens();
   G.match.reset(m.mode || 'coop', m.teams);
-  startGame(typeof m.idx === 'number' ? m.idx : Math.max(0, G.net.players.findIndex((p) => p.id === G.net.myId)));
+  G.bomb.stop();
+  await startGame(typeof m.idx === 'number' ? m.idx : Math.max(0, G.net.players.findIndex((p) => p.id === G.net.myId)));
+  if (m.mode === 'bomb') { G.enemies.clear(); G.bomb.startClient(!!m.mid); return; }
   if (m.mid) G.hud.banner('작전 합류', '진행 중인 작전에 합류했습니다');
 };
 G.netLost = (msg) => {
@@ -566,10 +582,11 @@ function checkOrientation() {
 // ───────────── 메뉴/설정 ─────────────
 function setupMenus() {
   const tap = (id, fn) => $(id).addEventListener('click', (e) => { e.preventDefault(); fn(); });
-  tap('btn-start', () => { if (G.net.active) G.net.close(); G.bomb.stop(); startGame(); });
-  tap('btn-bomb', async () => { if (G.net.active) G.net.close(); G.match.reset('coop'); await startGame(); G.waves.inter = -1; G.waves.queue = []; G.enemies.clear(); G.bomb.start(); });
+  const soloBomb = async () => { if (G.net.active) G.net.close(); G.bomb.stop(); G.match.reset('coop'); await startGame(); G.waves.inter = -1; G.waves.queue = []; G.enemies.clear(); G.bomb.start(); };
+  tap('btn-start', () => { G.lastSolo = 'waves'; if (G.net.active) G.net.close(); G.bomb.stop(); startGame(); });
+  tap('btn-bomb', () => { G.lastSolo = 'bomb'; soloBomb(); });
   tap('btn-multi', () => openLobby());
-  tap('btn-retry', () => { if (G.net.isHost) hostStart(); else startGame(); });
+  tap('btn-retry', () => { if (G.net.isHost) hostStart(); else if (G.lastSolo === 'bomb') soloBomb(); else { G.bomb.stop(); startGame(); } });
   const toMenu = () => { G.bomb.stop(); document.getElementById('buy').hidden = true; if (G.net.active) G.net.close(); G.enemies.clear(); G.pickups.clear(); G.combat.reset(); G.state = 'menu'; showMenu(); };
   tap('btn-menu', toMenu);
   tap('btn-quit', toMenu);
@@ -633,7 +650,7 @@ function buildGfxRows() {
     const setv = (v) => {
       if (c.top) settings[c.k] = v; else { settings.gfx[c.k] = v; settings.quality = 'custom'; }
       applyGraphics(false); syncSettings();
-      if (c.reload && G.state === 'menu' && G.world) G.loadMap(G.world.mapId); // 맵 형상에 영향 → 메뉴에서는 즉시 다시 생성
+      if (c.reload && G.state === 'menu' && G.world) G.loadMap(G.world.mapId, true); // 맵 형상에 영향 → 메뉴에서는 즉시 다시 생성
     };
     let el;
     if (c.type === 'range') {
@@ -709,21 +726,22 @@ function renderLobby() {
   $('lobby-room').hidden = !inRoom;
   if (!inRoom) return;
   $('lobby-code-big').textContent = N.code || '-----';
-  const tdm = N.lobbyMode === 'tdm';
+  const tdm = N.lobbyMode === 'tdm' || N.lobbyMode === 'bomb';
   $('lobby-players').innerHTML = N.players.map((p) => `<li class="${tdm ? `t${p.team || 0}` : ''}">${esc(p.name)}${tdm ? ` <em>${TEAM_NAMES[p.team || 0]}</em>` : ''}${p.host ? ' <em>방장</em>' : ''}${p.id === N.myId ? ' <em>나</em>' : ''}</li>`).join('');
   document.querySelectorAll('#seg-mode button').forEach((b) => { b.classList.toggle('on', b.dataset.m === N.lobbyMode); b.disabled = !N.isHost; });
   $('btn-team').hidden = !tdm;
-  $('lobby-mode-note').textContent = N.lobbyMode === 'coop' ? '함께 안드로이드 웨이브를 막습니다.' : tdm ? `2팀으로 나뉘어 먼저 ${MODES.tdm.limit}킬을 달성하면 승리 · 제한 8분` : `모두가 적 · 먼저 ${MODES.ffa.limit}킬을 달성하면 승리 · 제한 8분`;
+  $('lobby-mode-note').textContent = N.lobbyMode === 'coop' ? '함께 무장 병력 웨이브를 막습니다.' : N.lobbyMode === 'bomb' ? `5대5 폭파 작전 · 빈자리는 봇이 채움 · 공격은 폭탄 설치, 수비는 방어·해체 · ${7}라운드 선승` : tdm ? `2팀으로 나뉘어 먼저 ${MODES.tdm.limit}킬을 달성하면 승리 · 제한 8분` : `모두가 적 · 먼저 ${MODES.ffa.limit}킬을 달성하면 승리 · 제한 8분`;
   $('btn-go').hidden = !N.isHost;
   $('lobby-wait').hidden = N.isHost;
-  $('lobby-count').textContent = `${N.players.length} / 4`;
+  $('lobby-count').textContent = `${N.players.length} / ${MAX_PLAYERS}`;
 }
 function hostStart() {
   const N = G.net;
-  if (N.lobbyMode !== 'coop' && N.players.length < 2) { setLobbyStatus('대전 모드는 2명 이상이 필요합니다.', true); return; }
+  if (N.lobbyMode !== 'coop' && N.lobbyMode !== 'bomb' && N.players.length < 2) { setLobbyStatus('대전 모드는 2명 이상이 필요합니다.', true); return; }
+  G.bomb.stop();
   G.match.reset(N.lobbyMode, [...N.teams]);
   N.players.forEach((p, i) => { if (p.id !== N.myId) N.sendTo(p.id, N.startMsg(i)); });
-  startGame(0);
+  startGame(0).then(() => { if (N.lobbyMode === 'bomb') { G.enemies.clear(); G.bomb.start(); } });
 }
 function setupLobby() {
   G.net.onLobby = renderLobby;
@@ -758,9 +776,9 @@ let last = 0, fpsAcc = 0, fpsN = 0, fpsT = 0, hbT = 0;
 const menuCam = { t: 0 };
 
 function bombSpectate(dt) {
-  const ally = G.bomb.bots.find((b) => b.alive && b.team === G.bomb.playerTeam);
+  const ally = G.bomb.spectateTarget();
   const c = G.camera;
-  if (!ally) return;
+  if (!ally) { G.hud.setDown('관전할 아군이 없습니다 · 다음 라운드에 재투입'); return; }
   const back = new THREE.Vector3(-Math.sin(ally.yaw), 0, -Math.cos(ally.yaw)).multiplyScalar(2.6);
   const eye = ally.eye;
   c.position.lerp(eye.clone().add(back).add(new THREE.Vector3(0, 0.6, 0)), Math.min(1, dt * 5));
