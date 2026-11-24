@@ -119,11 +119,20 @@ export class Assets {
   }
 
   // 낮 맵 전용 에셋 (필요할 때만 받기): 실사 하늘 사진 4K, 환경광 RGBM, 지중해 텍스처 6종
-  async loadDay() {
-    if (this._dayLoaded) return;
+  // 낮 맵 에셋: 맵 종류별 실사 텍스처 + 하늘 사진(4K) + HDRI 환경광 + 태양 방향
+  //  town: 지중해 마을(Poly Haven furry_clouds) / desert: 사막 정유소(Poly Haven goegap)
+  async loadDay(kind = 'town') {
+    this._dayKinds = this._dayKinds || {};
+    if (this._dayKinds[kind]) { Object.assign(this, this._dayKinds[kind]); return; }
+    const SETS = {
+      town: ['white_stucco', 'beige_wall_001', 'plastered_stone_wall', 'clay_roof_tiles', 'cobblestone_floor_001', 'blue_painted_planks'],
+      desert: ['aerial_beach_01', 'concrete_floor_worn_001', 'rusty_metal_02', 'metal_plate', 'seaworn_sandstone_brick', 'sandstone_cracks'],
+    };
+    const SKY = { town: 'day', desert: 'desert' };
     const tl = new THREE.TextureLoader();
-    const jobs = [];
-    for (const set of ['white_stucco', 'beige_wall_001', 'plastered_stone_wall', 'clay_roof_tiles', 'cobblestone_floor_001', 'blue_painted_planks']) {
+    const jobs = [], out = {};
+    for (const set of SETS[kind]) {
+      if (this.tex[set]) continue;
       this.tex[set] = {};
       for (const m of ['diff', 'nor', 'arm']) jobs.push(tl.loadAsync(`${BASE}textures/${set}/${m}.jpg`).then((t) => {
         t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = Math.min(8, this.maxAniso);
@@ -131,12 +140,14 @@ export class Assets {
         this.tex[set][m] = t;
       }).catch((e) => { this.failed.push(`${set}/${m}`); console.warn('asset fail', set, m, e); }));
     }
-    jobs.push(tl.loadAsync(`${BASE}hdri/day_sky.jpg`).then((t) => { t.colorSpace = THREE.SRGBColorSpace; t.mapping = THREE.EquirectangularReflectionMapping; this.daySky = t; }).catch(() => this.failed.push('sky')));
-    jobs.push(tl.loadAsync(`${BASE}hdri/day_rgbm.png`).then((t) => { t.colorSpace = THREE.NoColorSpace; t.generateMipmaps = false; t.minFilter = THREE.LinearFilter; this.dayEnv = t; }).catch(() => this.failed.push('dayEnv')));
+    const sk = SKY[kind];
+    jobs.push(tl.loadAsync(`${BASE}hdri/${sk}_sky.jpg`).then((t) => { t.colorSpace = THREE.SRGBColorSpace; t.mapping = THREE.EquirectangularReflectionMapping; out.daySky = t; }).catch(() => this.failed.push('sky')));
+    jobs.push(tl.loadAsync(`${BASE}hdri/${sk}_rgbm.png`).then((t) => { t.colorSpace = THREE.NoColorSpace; t.generateMipmaps = false; t.minFilter = THREE.LinearFilter; out.dayEnv = t; }).catch(() => this.failed.push('dayEnv')));
     // 태양 방향 (HDRI 최대 밝기 픽셀에서 미리 계산해 둔 값)
-    jobs.push(fetch(`${BASE}hdri/day_sky.json`).then((r) => r.json()).then((j) => { this.daySun = j.sun; }).catch(() => {}));
+    jobs.push(fetch(`${BASE}hdri/${sk}_sky.json`).then((r) => r.json()).then((j) => { out.daySun = j.sun; }).catch(() => {}));
     await Promise.all(jobs);
-    this._dayLoaded = true;
+    this._dayKinds[kind] = out;
+    Object.assign(this, out);
   }
 
   // 실사 캐릭터·총기 (Sketchfab CC-BY, 원본 지오메트리 그대로 + WebP 텍스처). 원본 씬과 애니메이션을 그대로 보관

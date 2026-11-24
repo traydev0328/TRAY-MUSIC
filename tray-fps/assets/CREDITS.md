@@ -23,6 +23,8 @@
 | HDRI | furry_clouds (4K 사진 + 1K 조명) | 낮 맵 하늘 배경·환경광 | — |
 | 텍스처 | white_stucco · beige_wall_001 · plastered_stone_wall · clay_roof_tiles · cobblestone_floor_001 · blue_painted_planks | 지중해 마을 | — |
 | HDRI | rooftop_night (1K) | 환경 반사광(최대 밝기 제한 후 사용) | — |
+| HDRI | goegap (4K 사진 + 1K 조명) | 사막 정유소 하늘 배경·환경광 | — |
+| 텍스처 | aerial_beach_01 · concrete_floor_worn_001 · rusty_metal_02 · metal_plate · seaworn_sandstone_brick · sandstone_cracks | 사막 정유소 (모래·콘크리트·강판·사암 벽돌) | — |
 
 합계 약 9.7MB. 로드에 실패한 항목은 코드로 만든 절차적 대체물이 자동으로 쓰입니다.
 
@@ -36,6 +38,17 @@
 
 라이선스: https://creativecommons.org/licenses/by/4.0/
 변경 사항: 형상은 원본 그대로(폴리곤·좌표 무손실, 중복 데이터만 제거), 텍스처는 해상도 유지한 WebP(품질 92~95) 변환, 게임용 판정 박스·팀 완장 추가.
+
+## 추가 병사 4종 (Sketchfab, CC BY 4.0)
+
+| 모델 | 제작자 | 출처 | 사용처 |
+|---|---|---|---|
+| Soldier Full Tactical Gear (LowPolyGameReady) | 1799danly | https://sketchfab.com/3d-models/850593a8c7114c188395ba1849a66eb9 | 아군 로스터 (실사 M4 계열 소총 장착) |
+| German KSK operator - rigged | 42manako | https://sketchfab.com/3d-models/110daf3d1884412989e41dc95866c579 | 아군 로스터 (실사 M4 계열 소총 장착) |
+| BPRE Rifleman | dlrlgks1013 | https://sketchfab.com/3d-models/61d355f3515a44c1a5f6afe66b7a2631 | 적 로스터 (실사 AK 장착) |
+| Russian Soldier | doctortex | https://sketchfab.com/3d-models/e9aa211b67264dc086af1d2f4d4e3d84 | 적 로스터 (실사 AK 장착) |
+
+변경 사항: 형상 원본 유지(중복 데이터만 제거), 구형 반사광-광택 재질은 금속-거칠기 재질로 변환(Russian Soldier), 텍스처 WebP(해상도 유지), Character Creator·3ds Max Biped 뼈 이름을 Mixamo 표준 이름으로 대응시켜 동작 리타깃, 손에 실사 소총 장착.
 
 ## 실사 총기 12종 (Sketchfab, CC BY 4.0)
 

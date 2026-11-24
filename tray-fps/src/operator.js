@@ -225,9 +225,9 @@ export function buildOperator(op) {
 
 // ─────────── 실사 대원 (Sketchfab CC-BY, Mixamo 뼈대) ───────────
 import { clone as skClone } from 'three/addons/utils/SkeletonUtils.js';
-import { retarget, AnimCtl } from './anim.js';
+import { retarget, AnimCtl, boneName } from './anim.js';
 
-const boneName = (n) => n.replace(/^.*mixamorig:?/, '').replace(/_\d+$/, '').replace(/_end$/, '');
+// 뼈 이름 정규화는 anim.js 와 공유 (Mixamo·Character Creator·Biped 대응)
 
 // 실사 모델을 Operator 에 연결: 크기 보정, 뼈 매핑, 대기 동작, 판정 박스, 팀 완장
 export function buildRealOperator(op, variant) {

@@ -76,6 +76,26 @@ function mats() {
 
 function glowMat(color, k) { return new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(k), toneMapped: true }); }
 
+// ── 실사 병력 로스터 ──
+// 아군(공격팀·협동 대원): SWAT · 풀 전술 장비 대원 · KSK 대원 / 적(수비팀·웨이브 적): 전술복 병사 · 민병대 소총수 · 러시아군 / 중장갑 적: FSB
+export const ALLY_SKINS = ['swat', 'fullgear', 'ksk'];
+export const FOE_SKINS = ['tac_suit', 'rifleman', 'rus'];
+export const EXTRA_REAL = ['fullgear', 'ksk', 'rifleman', 'rus', 'ar_ar15']; // 시작 후 백그라운드로 받는 추가 모델
+const ARMED = { swat: true, fsb: true };   // 모델 자체에 총이 있는 캐릭터 (나머지는 실사 소총을 손에 쥐여 줌)
+// n 번째 대원의 외형: 아직 안 받아진 모델은 건너뛰고 받아진 것 중에서 고름
+export function pickSkin(G, list, n) {
+  const RA = (G.assets && G.assets.real) || {};
+  const ok = list.filter((v) => RA[v]);
+  return ok.length ? ok[Math.abs(n | 0) % ok.length] : list[0];
+}
+
+// 팀 완장 색: 내 편 초록 / 상대 빨강 (폭파 작전 봇·퍼펫)
+export function teamBand(e, myTeam) {
+  if (!e.visorMat || e.team === undefined) return;
+  const mine = e.team === myTeam;
+  e.visorMat.color.setRGB(mine ? 0.3 : 2.2, mine ? 1.8 : 0.25, mine ? 0.5 : 0.15);
+}
+
 export class Enemy {
   constructor(G, type, pos, { puppet = false, id = 0, variant = null } = {}) {
     this.G = G; this.type = type; this.T = TYPES[type]; this.variant = variant;
@@ -104,10 +124,11 @@ export class Enemy {
     // 실사 병력 (Sketchfab CC-BY): 일반 적 = 전술복 병사 + 실사 AK, 중장갑 = FSB 대원
     const RA = this.G.assets && this.G.assets.real;
     if (this.skin === 'android' && RA && RA.tac_suit && RA.fsb) {
-      const v = this.variant || (this.type === 'heavy' ? 'fsb' : 'tac_suit');
+      const v = this.variant || (this.type === 'heavy' ? 'fsb' : pickSkin(this.G, FOE_SKINS, this.id));
+      this.variant = v; // 실제 고른 외형 (멀티 스냅샷으로 전송 → 모든 화면에서 같은 외형)
       buildRealOperator(this, v);
       this.visorMat.color.setRGB(2.2, 0.25, 0.15); // 적 식별 완장(붉은색)
-      if (v === 'tac_suit') attachRifle(this);
+      if (!ARMED[v]) attachRifle(this, ALLY_SKINS.includes(v) ? 'ar_ar15' : 'ar_ak47t');
       return;
     }
     const g = geos(), M = mats(), s = this.T.scale, heavy = this.type === 'heavy', op = this.skin === 'operator';
@@ -520,7 +541,12 @@ export class Drone extends Enemy {
 export class Operator extends Enemy {
   get skin() { return 'operator'; }
   // 실사 모델(Sketchfab)이 있으면 사용, 없으면 코드 생성 모델
-  build() { if (this.G.assets.real && (this.G.assets.real.swat || this.G.assets.real.fsb)) buildRealOperator(this, this.variant || 'swat'); else buildOperator(this); }
+  build() {
+    if (!(this.G.assets.real && (this.G.assets.real.swat || this.G.assets.real.fsb))) { buildOperator(this); return; }
+    const v = this.variant || 'swat';
+    buildRealOperator(this, v);
+    if (!ARMED[v]) attachRifle(this, FOE_SKINS.includes(v) ? 'ar_ak47t' : 'ar_ar15');
+  }
   constructor(G, pos, name, variant = 'swat') {
     super(G, 'warden', pos, { puppet: true, variant });
     this.root.userData.enemy = null; // 사격 판정 대상 아님
@@ -575,18 +601,21 @@ export class Operator extends Enemy {
 }
 
 // 무장하지 않은 실사 모델에 실사 AK 를 가슴 앞 조준 자세로 장착 (정렬된 원본을 한 번 만들어 복제)
-let RIFLE_TPL = null;
-function attachRifle(e) {
-  const G = e.G, src = G.assets.real.ar_ak47t;
+const RIFLE_TPL = {};
+function attachRifle(e, gunId = 'ar_ak47t') {
+  const G = e.G;
+  if (!G.assets.real[gunId]) gunId = 'ar_ak47t'; // 아직 안 받아졌으면 AK 로 대체
+  const src = G.assets.real[gunId];
   if (!src) return;
-  if (!RIFLE_TPL) { const m = buildRealViewmodel(G.weapons, 'ar_ak47t', GUNS.ar_ak47t, src); RIFLE_TPL = { gun: m.gun, muzzleZ: m.muzzle.position.z, rightHand: m.rightHand.clone(), leftHand: m.leftHand.clone() }; }
-  const g = RIFLE_TPL.gun.clone(true);
+  if (!RIFLE_TPL[gunId]) { const m = buildRealViewmodel(G.weapons, gunId, GUNS[gunId], src); RIFLE_TPL[gunId] = { gun: m.gun, muzzleZ: m.muzzle.position.z, rightHand: m.rightHand.clone(), leftHand: m.leftHand.clone() }; }
+  const T = RIFLE_TPL[gunId];
+  const g = T.gun.clone(true);
   g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.raycast = () => {}; } if (o.isGroup && o.children.length && o.children[0].material && o.children[0].material.blending === THREE.AdditiveBlending) o.visible = false; });
   g.rotation.y = Math.PI; // 1인칭 기준(-z 앞) → 캐릭터 기준(+z 앞)
   g.position.set(0.1, 1.33, 0.22);
   e.root.add(g);
-  e.rig.muzzle.position.set(0.1, 1.33, 0.22 - RIFLE_TPL.muzzleZ);
-  if (e.anim) gripInHands(e, g, RIFLE_TPL);
+  e.rig.muzzle.position.set(0.1, 1.33, 0.22 - T.muzzleZ);
+  if (e.anim) gripInHands(e, g, T);
 }
 
 // 모션캡처 캐릭터: 총을 오른손에 쥐여 손과 함께 움직이게 한다.
@@ -609,6 +638,13 @@ function gripInHands(e, g, T) {
   q.premultiply(new THREE.Quaternion().setFromAxisAngle(vc, ang));
   g.quaternion.copy(q);
   g.position.copy(RH).sub(T.rightHand.clone().applyQuaternion(q));
+  // 두꺼운 방탄복을 입은 캐릭터는 손이 몸 가까이에 있어 총이 가슴 속에 묻힌다 → 총 중간이 가슴뼈보다 최소 30cm 앞에 오도록 앞으로 밀어냄
+  const chest = B.Spine2 || B.Spine1;
+  if (chest) {
+    const cz = chest.getWorldPosition(new THREE.Vector3()).applyMatrix4(inv).z;
+    const mid = g.position.clone().add(new THREE.Vector3(0, 0, -0.25).applyQuaternion(q));
+    if (mid.z - cz < 0.3) g.position.z += 0.3 - (mid.z - cz);
+  }
   g.updateMatrixWorld(true);
   rh.attach(g);
   e.gunMuzzle = new THREE.Object3D(); e.gunMuzzle.position.set(0, 0, T.muzzleZ); g.add(e.gunMuzzle);
@@ -666,9 +702,14 @@ export class Enemies {
   }
 
   // 참가자: 스냅샷으로 퍼펫 생성/갱신
-  syncPuppet(id, type, x, y, z, yaw, see) {
+  syncPuppet(id, type, x, y, z, yaw, see, team = -1, skin = null) {
     let e = this.byId.get(id);
-    if (!e) { if (this._deadIds && this._deadIds.has(id)) return; e = this._make(type, new THREE.Vector3(x, y, z), { id, puppet: true }); e.pos.set(x, y, z); }
+    if (!e) {
+      if (this._deadIds && this._deadIds.has(id)) return;
+      e = this._make(type, new THREE.Vector3(x, y, z), { id, puppet: true, variant: skin || null }); e.pos.set(x, y, z);
+      // 폭파 작전 봇: 팀 정보 (아군 사격 제외·완장 색)
+      if (team >= 0) { e.team = team; e.isBot = true; e.name = team === this.G.bomb.playerTeam ? '아군 봇' : '상대 봇'; teamBand(e, this.G.bomb.playerTeam); }
+    }
     if (!e.alive) return;
     e.netPos.set(x, y, z); e.netYaw = yaw; e.canSee = !!see; e.seenAt = this.G.time;
   }
@@ -696,10 +737,13 @@ export class Enemies {
   // 방장/싱글 전용: 점수, 피드, 드롭, 네트워크 알림
   onKill(e, head, by = 'local', dir = new THREE.Vector3()) {
     this.releaseToken(e);
-    if (this.G.bomb && this.G.bomb.active) { // 폭파 작전: 처치 피드·보상만
-      const killer = by === 'local' ? '나' : (this.byId.get(by) || {}).name || '폭발';
-      this.G.hud.feed(`${killer} ▸ ${e.name || e.T.name}${head ? ' · 헤드샷' : ''}`, by === 'local' ? 200 : 0);
-      if (by === 'local') this.G.bomb.onPlayerKill(e);
+    if (this.G.bomb && this.G.bomb.active) { // 폭파 작전: 처치 피드·보상 (+ 멀티: 퍼펫 사망 방송, 사람 처치 기록)
+      const G = this.G, me = G.match.me, human = typeof by === 'string' && by !== 'world';
+      const killer = by === me || by === 'local' ? (G.net.active ? G.net.name : '나') : human ? G.nameOf(by) : (this.byId.get(by) || {}).name || '폭발';
+      const txt = `${killer} ▸ ${e.name || e.T.name}${head ? ' · 헤드샷' : ''}`;
+      G.hud.feed(txt, by === me || by === 'local' ? 200 : 0);
+      if (human) { if (G.net.active) G.match.stat(by).kills++; G.bomb.rewardKill(by); }
+      if (G.net.isHost) { G.net.broadcast({ t: 'kill', id: e.id, d: G.net.v3(dir), h: head ? 1 : 0, by }); G.net.broadcast({ t: 'feed', txt, pts: 0 }); }
       return;
     }
     this.kills++; if (head) this.headshots++;
